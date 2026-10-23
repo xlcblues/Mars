@@ -15,6 +15,7 @@ import type { ViewId } from "../lib/navigation";
 interface SidebarProps {
   active: ViewId;
   onSelect: (view: ViewId) => void;
+  onQuickRecord: () => void;
 }
 
 const navItems: Array<{ id: ViewId; icon: LucideIcon }> = [
@@ -26,7 +27,7 @@ const navItems: Array<{ id: ViewId; icon: LucideIcon }> = [
   { id: "ai", icon: Sparkles },
 ];
 
-export function Sidebar({ active, onSelect }: SidebarProps) {
+export function Sidebar({ active, onSelect, onQuickRecord }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -55,7 +56,7 @@ export function Sidebar({ active, onSelect }: SidebarProps) {
       </nav>
 
       <div className="sidebar-footer">
-        <button type="button" className="primary-btn record-btn">
+        <button type="button" className="primary-btn record-btn" onClick={onQuickRecord}>
           <Plus size={16} strokeWidth={2.2} />
           <span>快速记录</span>
         </button>
