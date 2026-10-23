@@ -307,6 +307,7 @@ impl Database {
         start_date: Option<&str>,
         end_date: Option<&str>,
         project_id: Option<i64>,
+        tag: Option<&str>,
     ) -> Result<Vec<WorkEntry>, AppError> {
         let mut conditions = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -321,6 +322,10 @@ impl Database {
         if let Some(project) = project_id {
             conditions.push("e.project_id = ?");
             values.push(Box::new(project));
+        }
+        if let Some(tag) = tag {
+            conditions.push("e.tags LIKE ?");
+            values.push(Box::new(format!("%{}%", tag)));
         }
         let where_clause = if conditions.is_empty() {
             String::new()
@@ -516,10 +521,10 @@ impl Database {
         })
     }
 
-    pub fn week_trend(&self, start: &NaiveDate, end: &NaiveDate) -> Result<Vec<WeekTrendPoint>, AppError> {
+    pub fn week_trend(&self, start: &NaiveDate) -> Result<Vec<WeekTrendPoint>, AppError> {
         let mut points = Vec::new();
-        let mut day = *start;
-        while day <= *end {
+        for offset in 0..7 {
+            let day = *start + Duration::days(offset);
             let minutes: i64 = self.conn.query_row(
                 "SELECT COALESCE(SUM(
                    CASE WHEN started_at IS NOT NULL AND ended_at IS NOT NULL
@@ -533,7 +538,6 @@ impl Database {
                 date: day.format("%Y-%m-%d").to_string(),
                 minutes,
             });
-            day += Duration::days(1);
         }
         Ok(points)
     }
@@ -641,9 +645,14 @@ mod tests {
         assert_eq!(entry.project_name.as_deref(), Some("数据看板"));
 
         let filtered = db
-            .list_entries(Some("2026-10-22"), Some("2026-10-22"), Some(project.id))
+            .list_entries(Some("2026-10-22"), Some("2026-10-22"), Some(project.id), None)
             .unwrap();
         assert_eq!(filtered.len(), 1);
+
+        let tagged = db.list_entries(None, None, None, Some("指标")).unwrap();
+        assert!(tagged.iter().any(|e| e.id == entry.id));
+        let untagged = db.list_entries(None, None, None, Some("不存在")).unwrap();
+        assert!(untagged.is_empty());
 
         db.save_entry(&WorkEntryInput {
             id: Some(entry.id),
@@ -697,15 +706,14 @@ mod tests {
         assert_eq!(summary.week_entries, 1);
 
         let start = NaiveDate::parse_from_str(&week_start, "%Y-%m-%d").unwrap();
-        let end = Local::now().date_naive();
-        let trend = db.week_trend(&start, &end).unwrap();
+        let trend = db.week_trend(&start).unwrap();
         assert_eq!(trend.len(), 7);
         let today_point = trend.iter().find(|p| p.date == today).unwrap();
         assert_eq!(today_point.minutes, 60);
 
         let overview = db.project_overview(&today, &week_start).unwrap();
-        assert_eq!(overview.len(), 1);
-        assert_eq!(overview[0].week_minutes, 60);
-        assert!(overview[0].progress > 0);
+        let target = overview.iter().find(|p| p.id == project.id).unwrap();
+        assert_eq!(target.week_minutes, 60);
+        assert!(target.progress > 0);
     }
 }

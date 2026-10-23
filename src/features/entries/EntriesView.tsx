@@ -14,6 +14,7 @@ interface Filters {
   startDate: string;
   endDate: string;
   projectId: string;
+  tag: string;
 }
 
 function dateParts(dateStr: string): [number, number, number] {
@@ -27,6 +28,7 @@ export function EntriesView({ refreshKey }: EntriesViewProps) {
     startDate: weekStart,
     endDate: weekEnd,
     projectId: "",
+    tag: "",
   });
   const [entries, setEntries] = useState<WorkEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -42,6 +44,7 @@ export function EntriesView({ refreshKey }: EntriesViewProps) {
         startDate: filters.startDate || null,
         endDate: filters.endDate || null,
         projectId: filters.projectId ? Number(filters.projectId) : null,
+        tag: filters.tag.trim() || null,
       });
       setEntries(list);
     } catch (err) {
@@ -79,7 +82,7 @@ export function EntriesView({ refreshKey }: EntriesViewProps) {
   }
 
   function clearFilters() {
-    setFilters({ startDate: "", endDate: "", projectId: "" });
+    setFilters({ startDate: "", endDate: "", projectId: "", tag: "" });
   }
 
   const totalMinutes = entries.reduce((sum, entry) => sum + entry.durationMinutes, 0);
@@ -131,6 +134,15 @@ export function EntriesView({ refreshKey }: EntriesViewProps) {
                 </option>
               ))}
             </select>
+          </label>
+          <label className="filter-field">
+            <span>标签</span>
+            <input
+              type="text"
+              placeholder="如：分析、指标"
+              value={filters.tag}
+              onChange={(e) => setFilters((prev) => ({ ...prev, tag: e.target.value }))}
+            />
           </label>
           <button type="button" className="text-btn" onClick={clearFilters}>
             <X size={14} strokeWidth={1.9} />

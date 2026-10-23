@@ -72,6 +72,7 @@ export interface EntryFilters {
   startDate?: string | null;
   endDate?: string | null;
   projectId?: number | null;
+  tag?: string | null;
 }
 
 export const api = {
@@ -89,6 +90,7 @@ export const api = {
       startDate: filters.startDate ?? null,
       endDate: filters.endDate ?? null,
       projectId: filters.projectId ?? null,
+      tag: filters.tag ?? null,
     }),
   saveEntry: (entry: WorkEntryInput) => invoke<WorkEntry>("save_entry", { entry }),
   deleteEntry: (id: number) => invoke<void>("delete_entry", { id }),

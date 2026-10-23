@@ -11,12 +11,13 @@ pub fn list_entries(
     start_date: Option<String>,
     end_date: Option<String>,
     project_id: Option<i64>,
+    tag: Option<String>,
 ) -> Result<Vec<WorkEntry>, AppError> {
     state
         .db
         .lock()
         .map_err(|_| AppError("数据库锁获取失败".into()))?
-        .list_entries(start_date.as_deref(), end_date.as_deref(), project_id)
+        .list_entries(start_date.as_deref(), end_date.as_deref(), project_id, tag.as_deref())
 }
 
 #[tauri::command]

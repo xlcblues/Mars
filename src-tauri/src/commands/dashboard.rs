@@ -26,12 +26,11 @@ pub fn week_trend(state: State<'_, AppState>) -> Result<Vec<WeekTrendPoint>, App
     let today = Local::now().date_naive();
     let week_start = week_start_str(&today);
     let start = NaiveDate::from_str(&week_start).map_err(|err| AppError(err.to_string()))?;
-    let end = today;
     state
         .db
         .lock()
         .map_err(|_| AppError("数据库锁获取失败".into()))?
-        .week_trend(&start, &end)
+        .week_trend(&start)
 }
 
 #[tauri::command]
