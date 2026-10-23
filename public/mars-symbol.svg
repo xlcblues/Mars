@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Mars logo symbol">
+  <ellipse cx="256" cy="256" rx="158" ry="58" transform="rotate(-24 256 256)" fill="none" stroke="#C3451F" stroke-width="26" stroke-linecap="round" opacity="0.72"/>
+  <circle cx="256" cy="256" r="92" fill="#C3451F"/>
+  <circle cx="400" cy="298" r="15" fill="#C3451F" opacity="0.85"/>
+</svg>

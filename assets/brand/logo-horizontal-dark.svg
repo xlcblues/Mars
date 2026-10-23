@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" role="img" aria-label="Mars wordmark dark variant">
+  <g transform="translate(110 110) scale(0.35) translate(-256 -256)">
+    <ellipse cx="256" cy="256" rx="158" ry="58" transform="rotate(-24 256 256)" fill="none" stroke="#F6EFE6" stroke-width="26" stroke-linecap="round" opacity="0.72"/>
+    <circle cx="256" cy="256" r="92" fill="#F6EFE6"/>
+    <circle cx="400" cy="298" r="15" fill="#F6EFE6" opacity="0.9"/>
+  </g>
+  <text x="218" y="144" fill="#F6EFE6" font-family="'Segoe UI Variable Display','Segoe UI',Inter,sans-serif" font-size="88" font-weight="600" letter-spacing="0">Mars</text>
+</svg>

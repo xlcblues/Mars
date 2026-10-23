@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Mars app icon">
+  <rect x="28" y="28" width="968" height="968" rx="224" fill="#C3451F"/>
+  <g transform="translate(512 512) scale(2) translate(-256 -256)">
+    <ellipse cx="256" cy="256" rx="158" ry="58" transform="rotate(-24 256 256)" fill="none" stroke="#F6EFE6" stroke-width="26" stroke-linecap="round" opacity="0.7"/>
+    <circle cx="256" cy="256" r="92" fill="#F6EFE6"/>
+    <circle cx="400" cy="298" r="15" fill="#F6EFE6" opacity="0.9"/>
+  </g>
+</svg>
