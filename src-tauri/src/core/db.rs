@@ -88,6 +88,33 @@ pub struct DashboardSummary {
     pub streak_days: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnalyticsSummary {
+    pub total_minutes: i64,
+    pub entry_count: i64,
+    pub active_days: i64,
+    pub avg_minutes: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayStatPoint {
+    pub date: String,
+    pub minutes: i64,
+    pub entries: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectShare {
+    pub id: i64,
+    pub name: String,
+    pub color: Option<String>,
+    pub minutes: i64,
+    pub percent: i64,
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -573,9 +600,184 @@ impl Database {
         }
         Ok(projects)
     }
+
+    fn analytics_conditions(
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+        let mut conditions = vec!["e.work_date >= ?".to_string(), "e.work_date <= ?".to_string()];
+        let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![
+            Box::new(start_date.to_string()),
+            Box::new(end_date.to_string()),
+        ];
+        if let Some(project) = project_id {
+            conditions.push("e.project_id = ?".to_string());
+            values.push(Box::new(project));
+        }
+        if let Some(tag) = tag {
+            conditions.push("e.tags LIKE ?".to_string());
+            values.push(Box::new(format!("%{}%", tag)));
+        }
+        (format!(" WHERE {}", conditions.join(" AND ")), values)
+    }
+
+    pub fn analytics_summary(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> Result<AnalyticsSummary, AppError> {
+        let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
+        let sql = format!(
+            "SELECT COALESCE(SUM(CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+               THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0),
+               COUNT(*), COUNT(DISTINCT e.work_date)
+             FROM work_entries e{where_clause}"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let row = stmt.query_row(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok(AnalyticsSummary {
+                total_minutes: row.get(0)?,
+                entry_count: row.get(1)?,
+                active_days: row.get(2)?,
+                avg_minutes: 0.0,
+            })
+        })?;
+        let mut summary = row;
+        summary.avg_minutes = if summary.active_days > 0 {
+            summary.total_minutes as f64 / summary.active_days as f64
+        } else {
+            0.0
+        };
+        Ok(summary)
+    }
+
+    pub fn daily_trend(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> Result<Vec<DayStatPoint>, AppError> {
+        let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
+        let sql = format!(
+            "SELECT e.work_date,
+               COALESCE(SUM(CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+                 THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0),
+               COUNT(*)
+             FROM work_entries e{where_clause}
+             GROUP BY e.work_date
+             ORDER BY e.work_date"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok(DayStatPoint {
+                date: row.get(0)?,
+                minutes: row.get(1)?,
+                entries: row.get(2)?,
+            })
+        })?;
+        let mut by_date = std::collections::HashMap::new();
+        for row in rows {
+            let point = row?;
+            by_date.insert(point.date.clone(), point);
+        }
+        let start = NaiveDate::parse_from_str(start_date, "%Y-%m-%d").map_err(|err| AppError(err.to_string()))?;
+        let end = NaiveDate::parse_from_str(end_date, "%Y-%m-%d").map_err(|err| AppError(err.to_string()))?;
+        let mut points = Vec::new();
+        let mut day = start;
+        while day <= end {
+            let key = day.format("%Y-%m-%d").to_string();
+            points.push(by_date.remove(&key).unwrap_or(DayStatPoint {
+                date: key,
+                minutes: 0,
+                entries: 0,
+            }));
+            day += Duration::days(1);
+        }
+        Ok(points)
+    }
+
+    pub fn project_share(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> Result<Vec<ProjectShare>, AppError> {
+        let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
+        let sql = format!(
+            "SELECT p.id, p.name, p.color,
+               COALESCE(SUM(CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+                 THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0)
+             FROM projects p
+             JOIN work_entries e ON e.project_id = p.id{where_clause}
+             GROUP BY p.id, p.name, p.color
+             ORDER BY 3 DESC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok(ProjectShare {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+                minutes: row.get(3)?,
+                percent: 0,
+            })
+        })?;
+        let mut shares = Vec::new();
+        for row in rows {
+            shares.push(row?);
+        }
+        let total: i64 = shares.iter().map(|share| share.minutes).sum();
+        if total > 0 {
+            for share in &mut shares {
+                share.percent = (share.minutes * 100) / total;
+            }
+        }
+        Ok(shares)
+    }
 }
 
 const WEEK_TARGET_MINUTES: i64 = 20 * 60;
+
+pub fn analytics_csv(
+    summary: &AnalyticsSummary,
+    daily: &[DayStatPoint],
+    projects: &[ProjectShare],
+) -> String {
+    let mut csv = String::from("Mars 数据分析\n");
+    csv.push_str(&format!(
+        "总专注分钟,记录条数,活跃天数,日均分钟\n{},{},{},{:.1}\n\n",
+        summary.total_minutes, summary.entry_count, summary.active_days, summary.avg_minutes
+    ));
+    csv.push_str("日期,专注分钟,记录条数\n");
+    for point in daily {
+        csv.push_str(&format!("{},{},{}\n", point.date, point.minutes, point.entries));
+    }
+    csv.push('\n');
+    csv.push_str("项目,专注分钟,占比\n");
+    for project in projects {
+        csv.push_str(&format!("{},{},{}%\n", project.name, project.minutes, project.percent));
+    }
+    csv
+}
+
+pub fn analytics_json(
+    summary: &AnalyticsSummary,
+    daily: &[DayStatPoint],
+    projects: &[ProjectShare],
+) -> String {
+    serde_json::to_string_pretty(&serde_json::json!({
+        "summary": summary,
+        "daily": daily,
+        "projects": projects,
+    }))
+    .unwrap_or_else(|_| "{}".into())
+}
 
 pub fn today_str() -> String {
     Local::now().date_naive().format("%Y-%m-%d").to_string()
@@ -715,5 +917,88 @@ mod tests {
         let target = overview.iter().find(|p| p.id == project.id).unwrap();
         assert_eq!(target.week_minutes, 60);
         assert!(target.progress > 0);
+    }
+
+    #[test]
+    fn analytics_filters_and_export() {
+        let db = db();
+        let project_a = db.create_project("数据看板", Some("#2E8B8B")).unwrap();
+        let project_b = db.create_project("Mars 客户端", Some("#E14B2B")).unwrap();
+        let today = today_str();
+        let yesterday = (Local::now().date_naive() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project_a.id),
+            work_date: yesterday.clone(),
+            started_at: Some("09:00".into()),
+            ended_at: Some("10:00".into()),
+            title: "梳理指标口径".into(),
+            content: None,
+            tags: Some("指标,分析".into()),
+        })
+        .unwrap();
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project_a.id),
+            work_date: today.clone(),
+            started_at: Some("10:00".into()),
+            ended_at: Some("11:00".into()),
+            title: "输出看板初稿".into(),
+            content: None,
+            tags: Some("分析".into()),
+        })
+        .unwrap();
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project_b.id),
+            work_date: today.clone(),
+            started_at: Some("14:00".into()),
+            ended_at: Some("15:00".into()),
+            title: "Mars 客户端联调".into(),
+            content: None,
+            tags: Some("开发".into()),
+        })
+        .unwrap();
+
+        let summary = db.analytics_summary(&yesterday, &today, None, None).unwrap();
+        assert_eq!(summary.total_minutes, 180);
+        assert_eq!(summary.entry_count, 3);
+        assert_eq!(summary.active_days, 2);
+        assert_eq!(summary.avg_minutes, 90.0);
+
+        let tag_summary = db
+            .analytics_summary(&yesterday, &today, None, Some("指标"))
+            .unwrap();
+        assert_eq!(tag_summary.total_minutes, 60);
+        assert_eq!(tag_summary.entry_count, 1);
+
+        let project_summary = db
+            .analytics_summary(&yesterday, &today, Some(project_b.id), None)
+            .unwrap();
+        assert_eq!(project_summary.total_minutes, 60);
+
+        let daily = db.daily_trend(&yesterday, &today, None, None).unwrap();
+        assert_eq!(daily.len(), 2);
+        assert_eq!(daily[0].minutes, 60);
+        assert_eq!(daily[0].entries, 1);
+        assert_eq!(daily[1].minutes, 120);
+
+        let share = db.project_share(&yesterday, &today, None, None).unwrap();
+        let a = share.iter().find(|p| p.id == project_a.id).unwrap();
+        let b = share.iter().find(|p| p.id == project_b.id).unwrap();
+        assert_eq!(a.minutes, 120);
+        assert_eq!(a.percent, 66);
+        assert_eq!(b.minutes, 60);
+        assert_eq!(b.percent, 33);
+
+        let csv = analytics_csv(&summary, &daily, &share);
+        assert!(csv.contains("日期,专注分钟,记录条数"));
+        assert!(csv.contains("数据看板,120,66%"));
+        let json = analytics_json(&summary, &daily, &share);
+        assert!(json.contains("\"daily\""));
+        assert!(json.contains("\"projects\""));
     }
 }

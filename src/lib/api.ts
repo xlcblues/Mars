@@ -75,6 +75,34 @@ export interface EntryFilters {
   tag?: string | null;
 }
 
+export interface AnalyticsSummary {
+  totalMinutes: number;
+  entryCount: number;
+  activeDays: number;
+  avgMinutes: number;
+}
+
+export interface DayStatPoint {
+  date: string;
+  minutes: number;
+  entries: number;
+}
+
+export interface ProjectShare {
+  id: number;
+  name: string;
+  color: string | null;
+  minutes: number;
+  percent: number;
+}
+
+export interface AnalyticsFilters {
+  startDate: string;
+  endDate: string;
+  projectId: number | null;
+  tag: string | null;
+}
+
 export const api = {
   listProjects: (includeArchived = false) =>
     invoke<Project[]>("list_projects", { includeArchived }),
@@ -105,6 +133,37 @@ export const api = {
   weekTrend: () => invoke<WeekTrendPoint[]>("week_trend"),
   projectOverview: () => invoke<ProjectOverview[]>("project_overview"),
   weekRange: () => invoke<[string, string]>("week_range"),
+
+  analyticsSummary: (filters: AnalyticsFilters) =>
+    invoke<AnalyticsSummary>("analytics_summary", {
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      projectId: filters.projectId,
+      tag: filters.tag,
+    }),
+  dailyTrend: (filters: AnalyticsFilters) =>
+    invoke<DayStatPoint[]>("daily_trend", {
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      projectId: filters.projectId,
+      tag: filters.tag,
+    }),
+  projectShare: (filters: AnalyticsFilters) =>
+    invoke<ProjectShare[]>("project_share", {
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      projectId: filters.projectId,
+      tag: filters.tag,
+    }),
+  exportAnalytics: (format: "csv" | "json", filters: AnalyticsFilters, targetPath: string) =>
+    invoke<string>("export_analytics", {
+      format,
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      projectId: filters.projectId,
+      tag: filters.tag,
+      targetPath,
+    }),
 };
 
 export function formatMinutes(minutes: number): string {

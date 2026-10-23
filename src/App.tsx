@@ -4,6 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TodayView } from "./features/today/TodayView";
 import { ProjectsView } from "./features/projects/ProjectsView";
 import { EntriesView } from "./features/entries/EntriesView";
+import { AnalyticsView } from "./features/analytics/AnalyticsView";
 import { PlaceholderView } from "./features/PlaceholderView";
 import { EntryModal } from "./components/EntryModal";
 import type { Project } from "./lib/api";
@@ -12,6 +13,7 @@ import type { ViewId } from "./lib/navigation";
 import "./styles/app.css";
 import "./styles/today.css";
 import "./styles/features.css";
+import "./styles/analytics.css";
 
 function App() {
   const [view, setView] = useState<ViewId>("today");
@@ -48,6 +50,8 @@ function App() {
             <ProjectsView />
           ) : view === "entries" ? (
             <EntriesView refreshKey={refreshKey} />
+          ) : view === "analytics" ? (
+            <AnalyticsView />
           ) : (
             <PlaceholderView view={view} onBackToToday={() => setView("today")} />
           )}
