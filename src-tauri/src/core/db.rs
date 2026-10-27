@@ -115,6 +115,73 @@ pub struct ProjectShare {
     pub percent: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportTemplate {
+    pub id: i64,
+    pub name: String,
+    pub template_type: String,
+    pub blocks: Vec<TemplateBlock>,
+    pub is_default: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateBlock {
+    pub kind: String,
+    pub title: Option<String>,
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportTemplateInput {
+    pub id: Option<i64>,
+    pub name: String,
+    pub template_type: String,
+    pub blocks: Vec<TemplateBlock>,
+    pub is_default: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportDayItem {
+    pub date: String,
+    pub title: String,
+    pub project_name: Option<String>,
+    pub minutes: i64,
+    pub tags: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportProjectItem {
+    pub name: String,
+    pub minutes: i64,
+    pub entry_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportStats {
+    pub start_date: String,
+    pub end_date: String,
+    pub total_minutes: i64,
+    pub entry_count: i64,
+    pub active_days: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportRender {
+    pub content: String,
+    pub notices: Vec<String>,
+    pub stats: ReportStats,
+    pub days: Vec<ReportDayItem>,
+    pub projects: Vec<ReportProjectItem>,
+}
+
 pub struct Database {
     conn: Connection,
 }
@@ -130,6 +197,7 @@ impl Database {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         let db = Self { conn };
         db.run_migrations()?;
+        db.seed_default_report_templates()?;
         Ok(db)
     }
 
@@ -139,6 +207,7 @@ impl Database {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         let db = Self { conn };
         db.run_migrations()?;
+        db.seed_default_report_templates()?;
         Ok(db)
     }
 
@@ -214,6 +283,36 @@ impl Database {
                 ",
             )?;
         }
+        Ok(())
+    }
+
+    fn seed_default_report_templates(&self) -> Result<(), AppError> {
+        let count: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM report_templates", [], |row| row.get(0))?;
+        if count > 0 {
+            return Ok(());
+        }
+        let daily = serde_json::json!([
+            { "kind": "summary", "title": "今日概览", "content": null },
+            { "kind": "daily_list", "title": "工作记录", "content": null },
+            { "kind": "project_summary", "title": "项目汇总", "content": null },
+            { "kind": "todo_next", "title": "明日计划", "content": "（待补充）" }
+        ]);
+        let weekly = serde_json::json!([
+            { "kind": "summary", "title": "本周概览", "content": null },
+            { "kind": "daily_list", "title": "每日记录", "content": null },
+            { "kind": "project_summary", "title": "项目汇总", "content": null },
+            { "kind": "todo_next", "title": "下周计划", "content": "（待补充）" }
+        ]);
+        self.conn.execute(
+            "INSERT INTO report_templates (name, type, body_json, is_default) VALUES (?1, ?2, ?3, 1)",
+            params!["标准日报", "daily", daily.to_string()],
+        )?;
+        self.conn.execute(
+            "INSERT INTO report_templates (name, type, body_json, is_default) VALUES (?1, ?2, ?3, 1)",
+            params!["标准周报", "weekly", weekly.to_string()],
+        )?;
         Ok(())
     }
 
@@ -740,6 +839,353 @@ impl Database {
         }
         Ok(shares)
     }
+
+    pub fn list_report_templates(
+        &self,
+        template_type: Option<&str>,
+    ) -> Result<Vec<ReportTemplate>, AppError> {
+        let sql = match template_type {
+            Some(_) => "SELECT id, name, type, body_json, is_default, updated_at
+                         FROM report_templates
+                         WHERE type = ?1
+                         ORDER BY is_default DESC, updated_at DESC",
+            None => "SELECT id, name, type, body_json, is_default, updated_at
+                      FROM report_templates
+                      ORDER BY is_default DESC, updated_at DESC",
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = match template_type {
+            Some(t) => stmt.query_map(params![t], Self::row_to_report_template),
+            None => stmt.query_map([], Self::row_to_report_template),
+        }?;
+        let mut templates = Vec::new();
+        for row in rows {
+            templates.push(row?);
+        }
+        Ok(templates)
+    }
+
+    fn row_to_report_template(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReportTemplate> {
+        let body_json: String = row.get(3)?;
+        let blocks: Vec<TemplateBlock> =
+            serde_json::from_str(&body_json).unwrap_or_default();
+        Ok(ReportTemplate {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            template_type: row.get(2)?,
+            blocks,
+            is_default: row.get::<_, i64>(4)? != 0,
+            updated_at: row.get(5)?,
+        })
+    }
+
+    pub fn save_report_template(
+        &self,
+        input: &ReportTemplateInput,
+    ) -> Result<ReportTemplate, AppError> {
+        let body_json = serde_json::to_string(&input.blocks)
+            .map_err(|err| AppError(format!("模板序列化失败：{err}")))?;
+        let is_default = if input.is_default.unwrap_or(false) { 1 } else { 0 };
+
+        match input.id {
+            Some(id) => {
+                let updated = self.conn.execute(
+                    "UPDATE report_templates
+                     SET name = ?1, type = ?2, body_json = ?3, is_default = ?4,
+                         updated_at = datetime('now')
+                     WHERE id = ?5",
+                    params![input.name, input.template_type, body_json, is_default, id],
+                )?;
+                if updated == 0 {
+                    return Err(AppError("模板不存在".into()));
+                }
+                if is_default == 1 {
+                    self.conn.execute(
+                        "UPDATE report_templates SET is_default = 0 WHERE type = ?1 AND id <> ?2",
+                        params![input.template_type, id],
+                    )?;
+                }
+            }
+            None => {
+                self.conn.execute(
+                    "INSERT INTO report_templates (name, type, body_json, variables_json, is_default)
+                     VALUES (?1, ?2, ?3, NULL, ?4)",
+                    params![input.name, input.template_type, body_json, is_default],
+                )?;
+                let id = self.conn.last_insert_rowid();
+                if is_default == 1 {
+                    self.conn.execute(
+                        "UPDATE report_templates SET is_default = 0 WHERE type = ?1 AND id <> ?2",
+                        params![input.template_type, id],
+                    )?;
+                }
+            }
+        }
+
+        let id = match input.id {
+            Some(id) => id,
+            None => self.conn.last_insert_rowid(),
+        };
+        self.get_report_template(id)?
+            .ok_or_else(|| AppError("保存模板后读取失败".into()))
+    }
+
+    pub fn get_report_template(&self, id: i64) -> Result<Option<ReportTemplate>, AppError> {
+        self.conn
+            .query_row(
+                "SELECT id, name, type, body_json, is_default, updated_at
+                 FROM report_templates WHERE id = ?1",
+                params![id],
+                Self::row_to_report_template,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn delete_report_template(&self, id: i64) -> Result<(), AppError> {
+        let deleted = self
+            .conn
+            .execute("DELETE FROM report_templates WHERE id = ?1", params![id])?;
+        if deleted == 0 {
+            return Err(AppError("模板不存在".into()));
+        }
+        Ok(())
+    }
+
+    pub fn render_report(
+        &self,
+        report_type: &str,
+        start_date: &str,
+        end_date: &str,
+        template_id: Option<i64>,
+    ) -> Result<ReportRender, AppError> {
+        let template = match template_id {
+            Some(id) => self.get_report_template(id)?.ok_or_else(|| AppError("模板不存在".into()))?,
+            None => self
+                .list_report_templates(Some(report_type))?
+                .into_iter()
+                .find(|t| t.is_default)
+                .or_else(|| self.list_report_templates(Some(report_type)).ok().and_then(|list| list.into_iter().next()))
+                .ok_or_else(|| AppError("没有可用模板，请先创建模板".into()))?,
+        };
+
+        let start = NaiveDate::parse_from_str(start_date, "%Y-%m-%d")
+            .map_err(|err| AppError(format!("开始日期格式错误：{err}")))?;
+        let end = NaiveDate::parse_from_str(end_date, "%Y-%m-%d")
+            .map_err(|err| AppError(format!("结束日期格式错误：{err}")))?;
+        if end < start {
+            return Err(AppError("结束日期不能早于开始日期".into()));
+        }
+
+        let mut days = Vec::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT e.work_date, e.title, p.name,
+                    CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+                      THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60
+                      ELSE 0 END,
+                    e.tags
+             FROM work_entries e
+             LEFT JOIN projects p ON p.id = e.project_id
+             WHERE e.work_date BETWEEN ?1 AND ?2
+             ORDER BY e.work_date ASC, e.id ASC",
+        )?;
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            Ok(ReportDayItem {
+                date: row.get(0)?,
+                title: row.get(1)?,
+                project_name: row.get(2)?,
+                minutes: row.get(3)?,
+                tags: row.get(4)?,
+            })
+        })?;
+        for row in rows {
+            days.push(row?);
+        }
+
+        let total_minutes: i64 = days.iter().map(|d| d.minutes).sum();
+        let active_days = {
+            let mut set = std::collections::HashSet::new();
+            for d in &days {
+                set.insert(d.date.clone());
+            }
+            set.len() as i64
+        };
+        let stats = ReportStats {
+            start_date: start_date.to_string(),
+            end_date: end_date.to_string(),
+            total_minutes,
+            entry_count: days.len() as i64,
+            active_days,
+        };
+
+        let mut projects: Vec<ReportProjectItem> = Vec::new();
+        for d in &days {
+            if let Some(name) = &d.project_name {
+                if let Some(p) = projects.iter_mut().find(|p| &p.name == name) {
+                    p.minutes += d.minutes;
+                    p.entry_count += 1;
+                } else {
+                    projects.push(ReportProjectItem {
+                        name: name.clone(),
+                        minutes: d.minutes,
+                        entry_count: 1,
+                    });
+                }
+            }
+        }
+        projects.sort_by(|a, b| b.minutes.cmp(&a.minutes));
+
+        let mut notices = Vec::new();
+        let missing_days: Vec<String> = (0..=(end - start).num_days())
+            .filter_map(|offset| {
+                let date = start + Duration::days(offset);
+                if !days.iter().any(|d| d.date == date.format("%Y-%m-%d").to_string()) {
+                    Some(date.format("%Y-%m-%d").to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !missing_days.is_empty() {
+            notices.push(format!("以下日期没有记录：{}", missing_days.join("、")));
+        }
+        let unlinked = days.iter().filter(|d| d.project_name.is_none()).count();
+        if unlinked > 0 {
+            notices.push(format!("有 {} 条记录未关联项目，未计入项目汇总", unlinked));
+        }
+        if days.is_empty() {
+            notices.push("该时间段内没有工作记录".into());
+        }
+
+        let content = self.render_markdown(&template, &stats, &days, &projects, &notices);
+        Ok(ReportRender {
+            content,
+            notices,
+            stats,
+            days,
+            projects,
+        })
+    }
+
+    fn render_markdown(
+        &self,
+        template: &ReportTemplate,
+        stats: &ReportStats,
+        days: &[ReportDayItem],
+        projects: &[ReportProjectItem],
+        notices: &[String],
+    ) -> String {
+        let kind_label = if template.template_type == "weekly" {
+            "周报"
+        } else {
+            "日报"
+        };
+        let title = if stats.start_date == stats.end_date {
+            format!("{} {}（{}）", template.name, kind_label, stats.start_date)
+        } else {
+            format!("{}（{} 至 {}）", template.name, stats.start_date, stats.end_date)
+        };
+        let mut out = String::new();
+        out.push_str(&format!("# {}\n\n", title));
+
+        for block in &template.blocks {
+            let heading = block.title.clone().unwrap_or_else(|| match block.kind.as_str() {
+                "summary" => "概览".into(),
+                "daily_list" => "工作记录".into(),
+                "project_summary" => "项目汇总".into(),
+                "todo_next" => "计划与待办".into(),
+                _ => "内容".into(),
+            });
+            out.push_str(&format!("## {}\n\n", heading));
+            match block.kind.as_str() {
+                "summary" => {
+                    out.push_str(&format!(
+                        "- 时间范围：{} 至 {}\n",
+                        stats.start_date, stats.end_date
+                    ));
+                    out.push_str(&format!("- 记录条数：{}\n", stats.entry_count));
+                    out.push_str(&format!("- 有效天数：{}\n", stats.active_days));
+                    out.push_str(&format!(
+                        "- 专注时长：{} 分钟\n\n",
+                        stats.total_minutes
+                    ));
+                }
+                "daily_list" => {
+                    if days.is_empty() {
+                        out.push_str("（暂无记录）\n\n");
+                    } else {
+                        let mut current = String::new();
+                        for d in days {
+                            if d.date != current {
+                                current = d.date.clone();
+                                out.push_str(&format!("### {}\n\n", d.date));
+                            }
+                            let project = d
+                                .project_name
+                                .as_deref()
+                                .map(|name| format!(" `{name}`"))
+                                .unwrap_or_default();
+                            out.push_str(&format!("- {}（{} 分钟）{}\n", d.title, d.minutes, project));
+                        }
+                        out.push('\n');
+                    }
+                }
+                "project_summary" => {
+                    if projects.is_empty() {
+                        out.push_str("（暂无项目数据）\n\n");
+                    } else {
+                        for p in projects {
+                            out.push_str(&format!(
+                                "- {}：{} 分钟 / {} 条\n",
+                                p.name, p.minutes, p.entry_count
+                            ));
+                        }
+                        out.push('\n');
+                    }
+                }
+                "todo_next" => {
+                    let custom = block.content.as_deref().unwrap_or("（待补充）");
+                    out.push_str(custom);
+                    out.push_str("\n\n");
+                }
+                _ => {
+                    if let Some(content) = &block.content {
+                        out.push_str(content);
+                        out.push('\n');
+                    }
+                    out.push('\n');
+                }
+            }
+        }
+
+        if !notices.is_empty() {
+            out.push_str("## 提示\n\n");
+            for notice in notices {
+                out.push_str(&format!("- {notice}\n"));
+            }
+        }
+        out
+    }
+
+    pub fn export_report(
+        &self,
+        format: &str,
+        report_type: &str,
+        start_date: &str,
+        end_date: &str,
+        template_id: Option<i64>,
+        target_path: &str,
+    ) -> Result<String, AppError> {
+        let rendered =
+            self.render_report(report_type, start_date, end_date, template_id)?;
+        let content = match format {
+            "md" | "markdown" => rendered.content,
+            "html" => markdown_to_html(&rendered),
+            _ => return Err(AppError("不支持的导出格式".into())),
+        };
+        std::fs::write(target_path, content).map_err(|err| AppError(format!("导出失败：{err}")))?;
+        Ok(target_path.to_string())
+    }
 }
 
 const WEEK_TARGET_MINUTES: i64 = 20 * 60;
@@ -788,6 +1234,41 @@ pub fn week_start_str(today: &NaiveDate) -> String {
     (*today - chrono::Duration::days(weekday))
         .format("%Y-%m-%d")
         .to_string()
+}
+
+fn html_escape(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn markdown_to_html(render: &ReportRender) -> String {
+    let mut out = String::from("<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n");
+    out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
+    out.push_str("<title>Mars 工作报告</title>\n<style>\n");
+    out.push_str("body{font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;max-width:820px;margin:40px auto;padding:0 24px;color:#1c1917;line-height:1.7;}\n");
+    out.push_str("h1{font-size:26px;border-bottom:2px solid #e5e2df;padding-bottom:10px;}h2{margin-top:28px;font-size:18px;}h3{font-size:15px;}\n");
+    out.push_str("li{margin:4px 0;}blockquote{border-left:3px solid #d6d0cb;margin:0;padding-left:12px;color:#57534e;}\n");
+    out.push_str("</style>\n</head>\n<body>\n");
+    for line in render.content.lines() {
+        if let Some(rest) = line.strip_prefix("# ") {
+            out.push_str(&format!("<h1>{}</h1>\n", html_escape(rest)));
+        } else if let Some(rest) = line.strip_prefix("## ") {
+            out.push_str(&format!("<h2>{}</h2>\n", html_escape(rest)));
+        } else if let Some(rest) = line.strip_prefix("### ") {
+            out.push_str(&format!("<h3>{}</h3>\n", html_escape(rest)));
+        } else if let Some(rest) = line.strip_prefix("- ") {
+            out.push_str(&format!("<li>{}</li>\n", html_escape(rest)));
+        } else if line.trim().is_empty() {
+            out.push_str("<br>\n");
+        } else {
+            out.push_str(&format!("<p>{}</p>\n", html_escape(line)));
+        }
+    }
+    out.push_str("</body>\n</html>\n");
+    out
 }
 
 #[cfg(test)]
@@ -1000,5 +1481,187 @@ mod tests {
         let json = analytics_json(&summary, &daily, &share);
         assert!(json.contains("\"daily\""));
         assert!(json.contains("\"projects\""));
+    }
+
+    #[test]
+    fn report_template_crud_and_default() {
+        let db = db();
+        let template = db
+            .save_report_template(&ReportTemplateInput {
+                id: None,
+                name: "标准日报".into(),
+                template_type: "daily".into(),
+                blocks: vec![
+                    TemplateBlock {
+                        kind: "summary".into(),
+                        title: Some("概览".into()),
+                        content: None,
+                    },
+                    TemplateBlock {
+                        kind: "daily_list".into(),
+                        title: Some("工作记录".into()),
+                        content: None,
+                    },
+                ],
+                is_default: Some(true),
+            })
+            .unwrap();
+        assert!(template.is_default);
+        assert_eq!(template.blocks.len(), 2);
+
+        let listed = db.list_report_templates(Some("daily")).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(db.list_report_templates(Some("weekly")).unwrap().len(), 1);
+
+        let updated = db
+            .save_report_template(&ReportTemplateInput {
+                id: Some(template.id),
+                name: "标准日报 v2".into(),
+                template_type: "daily".into(),
+                blocks: vec![TemplateBlock {
+                    kind: "project_summary".into(),
+                    title: None,
+                    content: None,
+                }],
+                is_default: Some(false),
+            })
+            .unwrap();
+        assert_eq!(updated.name, "标准日报 v2");
+        assert!(!updated.is_default);
+        assert_eq!(updated.blocks[0].kind, "project_summary");
+
+        db.delete_report_template(updated.id).unwrap();
+        assert_eq!(db.list_report_templates(Some("daily")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn report_default_seed() {
+        let db = db();
+        let daily = db.list_report_templates(Some("daily")).unwrap();
+        let weekly = db.list_report_templates(Some("weekly")).unwrap();
+        assert_eq!(daily.len(), 1);
+        assert_eq!(weekly.len(), 1);
+        assert!(daily[0].is_default);
+        assert!(weekly[0].is_default);
+        assert!(daily[0].name.contains("日报"));
+        assert!(weekly[0].name.contains("周报"));
+        assert!(daily[0].blocks.iter().any(|b| b.kind == "summary"));
+        assert!(weekly[0].blocks.iter().any(|b| b.kind == "daily_list"));
+    }
+
+    #[test]
+    fn report_render_notices_and_missing_days() {
+        let db = db();
+        let project = db.create_project("数据看板", Some("#2E8B8B")).unwrap();
+        let template = db
+            .save_report_template(&ReportTemplateInput {
+                id: None,
+                name: "标准日报".into(),
+                template_type: "daily".into(),
+                blocks: vec![
+                    TemplateBlock {
+                        kind: "summary".into(),
+                        title: Some("概览".into()),
+                        content: None,
+                    },
+                    TemplateBlock {
+                        kind: "daily_list".into(),
+                        title: Some("工作记录".into()),
+                        content: None,
+                    },
+                    TemplateBlock {
+                        kind: "project_summary".into(),
+                        title: Some("项目汇总".into()),
+                        content: None,
+                    },
+                ],
+                is_default: Some(true),
+            })
+            .unwrap();
+
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project.id),
+            work_date: "2026-10-21".into(),
+            started_at: Some("09:00".into()),
+            ended_at: Some("10:30".into()),
+            title: "梳理指标口径".into(),
+            content: None,
+            tags: Some("分析".into()),
+        })
+        .unwrap();
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: None,
+            work_date: "2026-10-22".into(),
+            started_at: Some("14:00".into()),
+            ended_at: Some("15:00".into()),
+            title: "整理会议纪要".into(),
+            content: None,
+            tags: None,
+        })
+        .unwrap();
+
+        let render = db
+            .render_report("daily", "2026-10-20", "2026-10-22", Some(template.id))
+            .unwrap();
+        assert_eq!(render.stats.entry_count, 2);
+        assert_eq!(render.stats.total_minutes, 150);
+        assert_eq!(render.stats.active_days, 2);
+        assert!(render.content.contains("2026-10-20"));
+        assert!(render.content.contains("2026-10-20"));
+        assert!(render.notices.iter().any(|n| n.contains("2026-10-20")));
+        assert!(render.notices.iter().any(|n| n.contains("未关联项目")));
+        assert_eq!(render.projects.len(), 1);
+        assert_eq!(render.projects[0].name, "数据看板");
+
+        let empty = db
+            .render_report("daily", "2026-10-23", "2026-10-24", Some(template.id))
+            .unwrap();
+        assert!(empty.notices.iter().any(|n| n.contains("没有工作记录")));
+        assert!(empty.content.contains("暂无记录"));
+    }
+
+    #[test]
+    fn report_html_export_escapes_content() {
+        let db = db();
+        let template = db
+            .save_report_template(&ReportTemplateInput {
+                id: None,
+                name: "日报".into(),
+                template_type: "daily".into(),
+                blocks: vec![
+                    TemplateBlock {
+                        kind: "daily_list".into(),
+                        title: Some("工作记录".into()),
+                        content: None,
+                    },
+                    TemplateBlock {
+                        kind: "todo_next".into(),
+                        title: Some("计划".into()),
+                        content: Some("<script>alert(1)</script>".into()),
+                    },
+                ],
+                is_default: Some(true),
+            })
+            .unwrap();
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: None,
+            work_date: "2026-10-21".into(),
+            started_at: None,
+            ended_at: None,
+            title: "标题 <b>测试</b>".into(),
+            content: None,
+            tags: None,
+        })
+        .unwrap();
+        let render = db
+            .render_report("daily", "2026-10-21", "2026-10-21", Some(template.id))
+            .unwrap();
+        let html = markdown_to_html(&render);
+        assert!(html.contains("&lt;script&gt;"));
+        assert!(html.contains("&lt;b&gt;测试"));
+        assert!(!html.contains("<script>"));
     }
 }

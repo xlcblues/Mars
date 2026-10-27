@@ -3,6 +3,7 @@ pub mod attachments;
 pub mod dashboard;
 pub mod entries;
 pub mod projects;
+pub mod reports;
 
 use std::sync::Mutex;
 

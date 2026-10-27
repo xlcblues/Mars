@@ -103,6 +103,59 @@ export interface AnalyticsFilters {
   tag: string | null;
 }
 
+export interface TemplateBlock {
+  kind: string;
+  title: string | null;
+  content: string | null;
+}
+
+export interface ReportTemplate {
+  id: number;
+  name: string;
+  templateType: string;
+  blocks: TemplateBlock[];
+  isDefault: boolean;
+  updatedAt: string;
+}
+
+export interface ReportTemplateInput {
+  id?: number | null;
+  name: string;
+  templateType: string;
+  blocks: TemplateBlock[];
+  isDefault?: boolean | null;
+}
+
+export interface ReportDayItem {
+  date: string;
+  title: string;
+  projectName: string | null;
+  minutes: number;
+  tags: string | null;
+}
+
+export interface ReportProjectItem {
+  name: string;
+  minutes: number;
+  entryCount: number;
+}
+
+export interface ReportStats {
+  startDate: string;
+  endDate: string;
+  totalMinutes: number;
+  entryCount: number;
+  activeDays: number;
+}
+
+export interface ReportRender {
+  content: string;
+  notices: string[];
+  stats: ReportStats;
+  days: ReportDayItem[];
+  projects: ReportProjectItem[];
+}
+
 export const api = {
   listProjects: (includeArchived = false) =>
     invoke<Project[]>("list_projects", { includeArchived }),
@@ -162,6 +215,42 @@ export const api = {
       endDate: filters.endDate,
       projectId: filters.projectId,
       tag: filters.tag,
+      targetPath,
+    }),
+
+  listReportTemplates: (templateType?: string | null) =>
+    invoke<ReportTemplate[]>("list_report_templates", {
+      templateType: templateType ?? null,
+    }),
+  saveReportTemplate: (input: ReportTemplateInput) =>
+    invoke<ReportTemplate>("save_report_template", { input }),
+  deleteReportTemplate: (id: number) => invoke<void>("delete_report_template", { id }),
+  renderReport: (
+    reportType: string,
+    startDate: string,
+    endDate: string,
+    templateId: number | null,
+  ) =>
+    invoke<ReportRender>("render_report", {
+      reportType,
+      startDate,
+      endDate,
+      templateId,
+    }),
+  exportReport: (
+    format: "md" | "html",
+    reportType: string,
+    startDate: string,
+    endDate: string,
+    templateId: number | null,
+    targetPath: string,
+  ) =>
+    invoke<string>("export_report", {
+      format,
+      reportType,
+      startDate,
+      endDate,
+      templateId,
       targetPath,
     }),
 };

@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
-use commands::{analytics, attachments, dashboard, entries, projects, AppState};
+use commands::{analytics, attachments, dashboard, entries, projects, reports, AppState};
 use core::attachments::Attachments;
 use core::db::Database;
 
@@ -58,6 +58,11 @@ pub fn run() {
             analytics::daily_trend,
             analytics::project_share,
             analytics::export_analytics,
+            reports::list_report_templates,
+            reports::save_report_template,
+            reports::delete_report_template,
+            reports::render_report,
+            reports::export_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
