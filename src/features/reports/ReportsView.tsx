@@ -589,9 +589,7 @@ export function ReportsView() {
                 </button>
                 {paletteOpen && (
                   <div className="palette-options">
-                    {BLOCK_OPTIONS.filter(
-                      (option) => !draftBlocks.some((block) => block.kind === option.kind),
-                    ).map((option) => (
+                    {BLOCK_OPTIONS.map((option) => (
                       <button
                         type="button"
                         className="palette-option"
