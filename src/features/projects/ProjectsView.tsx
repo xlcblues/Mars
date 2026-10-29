@@ -156,42 +156,43 @@ export function ProjectsView() {
           {list.map((project) => (
             <div className="project-row" key={project.id}>
               {editingId === project.id ? (
-                <>
-                  <div className="color-picker inline">
-                    {PRESET_COLORS.map((preset) => (
-                      <button
-                        type="button"
-                        key={preset}
-                        className={`swatch${preset === editColor ? " selected" : ""}`}
-                        style={{ background: preset }}
-                        onClick={() => setEditColor(preset)}
-                        aria-label={`颜色 ${preset}`}
-                      />
-                    ))}
+                <div className="project-edit">
+                  <div className="project-edit-field project-edit-name">
+                    <span>项目名称</span>
+                    <input
+                      className="name-input"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && void saveEdit()}
+                      autoFocus
+                    />
                   </div>
-                  <input
-                    className="name-input"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && void saveEdit()}
-                    autoFocus
-                  />
-                  <div className="row-actions">
-                    <button type="button" className="text-btn" onClick={saveEdit} title="保存">
-                      <Check size={14} strokeWidth={2} />
-                      <span>保存</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="text-btn"
-                      onClick={() => setEditingId(null)}
-                      title="取消"
-                    >
+                  <div className="project-edit-field project-edit-colors">
+                    <span>项目颜色</span>
+                    <div className="color-picker" aria-label="选择编辑颜色">
+                      {PRESET_COLORS.map((preset) => (
+                        <button
+                          type="button"
+                          key={preset}
+                          className={`swatch${preset === editColor ? " selected" : ""}`}
+                          style={{ background: preset }}
+                          onClick={() => setEditColor(preset)}
+                          aria-label={`颜色 ${preset}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="project-edit-actions">
+                    <button type="button" className="secondary-btn" onClick={() => setEditingId(null)}>
                       <X size={14} strokeWidth={2} />
                       <span>取消</span>
                     </button>
+                    <button type="button" className="primary-btn" onClick={saveEdit}>
+                      <Check size={14} strokeWidth={2} />
+                      <span>保存</span>
+                    </button>
                   </div>
-                </>
+                </div>
               ) : (
                 <>
                   <div className="project-main">
