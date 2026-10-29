@@ -18,6 +18,10 @@
   overflow-y: auto;
 }
 
+.today-main {
+  overflow: hidden;
+}
+
 .content {
   width: 100%;
   max-width: 1120px;

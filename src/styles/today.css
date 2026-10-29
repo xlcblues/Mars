@@ -1,3 +1,16 @@
+.today-view {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.today-view .page-head,
+.today-view .stats-grid {
+  flex: none;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -90,7 +103,10 @@
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+  overflow: hidden;
 }
 
 .today-side {
@@ -98,9 +114,28 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+  min-height: 0;
+}
+
+.today-side .card,
+.entries-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.today-side .card {
+  flex: 1 1 0;
+}
+
+.today-view .card-head {
+  flex: none;
 }
 
 .entries-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
 }
@@ -200,7 +235,9 @@
 }
 
 .trend-chart {
-  height: 176px;
+  flex: 1;
+  min-height: 0;
+  height: auto;
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
@@ -248,6 +285,9 @@
 }
 
 .project-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   padding: 0 16px 16px;

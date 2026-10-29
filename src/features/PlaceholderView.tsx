@@ -4,6 +4,7 @@ import {
   FileText,
   FolderKanban,
   NotebookPen,
+  Settings,
   Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -35,6 +36,10 @@ const placeholderMeta: Record<Exclude<ViewId, "today">, { icon: LucideIcon; copy
   ai: {
     icon: Sparkles,
     copy: "用自然语言查询数据并操作受控功能。M4 里程碑将接入大模型。",
+  },
+  settings: {
+    icon: Settings,
+    copy: "管理本地数据、备份与恢复，保障记录不丢失。",
   },
 };
 

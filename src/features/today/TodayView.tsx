@@ -80,7 +80,7 @@ export function TodayView({ refreshKey, onQuickRecord }: TodayViewProps) {
   ];
 
   return (
-    <div className="content">
+    <div className="today-view content">
       <div className="page-head">
         <div>
           <p className="page-kicker">{formatChineseDate(today)}</p>

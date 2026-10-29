@@ -792,6 +792,105 @@ impl Database {
         Ok(attachment.map(|item| item.file_path))
     }
 
+    pub fn checkpoint(&self) -> Result<(), AppError> {
+        self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        Ok(())
+    }
+
+    pub fn user_version(&self) -> Result<i64, AppError> {
+        Ok(self.conn.query_row("PRAGMA user_version", [], |row| row.get(0))?)
+    }
+
+    pub fn restore_from_backup(&mut self, backup_path: &Path) -> Result<(), AppError> {
+        let backup = Connection::open(backup_path)?;
+        let current_version: i64 =
+            self.conn
+                .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        let backup_version: i64 =
+            backup.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if backup_version != current_version {
+            return Err(AppError(format!(
+                "备份版本（v{backup_version}）与当前数据版本（v{current_version}）不一致"
+            )));
+        }
+        let required_tables = [
+            "projects",
+            "work_entries",
+            "attachments",
+            "report_templates",
+            "reports",
+            "ai_tool_logs",
+            "ai_sessions",
+            "settings",
+        ];
+        for table in required_tables {
+            let exists: Option<String> = backup
+                .query_row(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if exists.is_none() {
+                return Err(AppError(format!("备份缺少数据表 {table}，版本不兼容")));
+            }
+        }
+        drop(backup);
+
+        let backup_path = backup_path.to_string_lossy().to_string();
+        self.conn
+            .execute("ATTACH DATABASE ?1 AS src", params![backup_path])?;
+
+        let copy_sql = "
+            DELETE FROM attachments;
+            DELETE FROM work_entries;
+            DELETE FROM projects;
+            DELETE FROM reports;
+            DELETE FROM report_templates;
+            DELETE FROM ai_tool_logs;
+            DELETE FROM ai_sessions;
+            DELETE FROM settings;
+
+            INSERT INTO projects (id, name, color, status, created_at, archived_at)
+              SELECT id, name, color, status, created_at, archived_at FROM src.projects;
+            INSERT INTO work_entries
+              (id, project_id, work_date, started_at, ended_at, title, content, tags, created_at, updated_at)
+              SELECT id, project_id, work_date, started_at, ended_at, title, content, tags,
+                     created_at, updated_at FROM src.work_entries;
+            INSERT INTO attachments
+              (id, entry_id, file_name, file_path, mime_type, size_bytes, created_at)
+              SELECT id, entry_id, file_name, file_path, mime_type, size_bytes, created_at
+                FROM src.attachments;
+            INSERT INTO report_templates
+              (id, name, type, body_json, variables_json, is_default, updated_at)
+              SELECT id, name, type, body_json, variables_json, is_default, updated_at
+                FROM src.report_templates;
+            INSERT INTO reports
+              (id, template_id, type, start_date, end_date, content, exported_at)
+              SELECT id, template_id, type, start_date, end_date, content, exported_at
+                FROM src.reports;
+            INSERT INTO ai_tool_logs
+              (id, session_id, tool_name, args_json, status, created_at)
+              SELECT id, session_id, tool_name, args_json, status, created_at
+                FROM src.ai_tool_logs;
+            INSERT INTO ai_sessions
+              (id, title, messages_json, created_at, updated_at)
+              SELECT id, title, messages_json, created_at, updated_at
+                FROM src.ai_sessions;
+            INSERT INTO settings (key, value) SELECT key, value FROM src.settings;
+        ";
+
+        let result = (|| -> Result<(), AppError> {
+            let tx = self.conn.transaction()?;
+            tx.execute_batch(copy_sql)?;
+            tx.commit()?;
+            Ok(())
+        })();
+
+        self.conn.execute_batch("DETACH DATABASE src;")?;
+        result
+    }
+
     pub fn dashboard_summary(&self, today: &str, week_start: &str) -> Result<DashboardSummary, AppError> {
         let today_entries: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM work_entries WHERE work_date = ?1",

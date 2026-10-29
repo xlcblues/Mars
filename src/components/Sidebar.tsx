@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   NotebookPen,
   Plus,
+  Settings,
   Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -25,6 +26,7 @@ const navItems: Array<{ id: ViewId; icon: LucideIcon }> = [
   { id: "analytics", icon: BarChart3 },
   { id: "reports", icon: FileText },
   { id: "ai", icon: Sparkles },
+  { id: "settings", icon: Settings },
 ];
 
 export function Sidebar({ active, onSelect, onQuickRecord }: SidebarProps) {

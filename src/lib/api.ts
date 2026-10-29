@@ -241,6 +241,29 @@ export interface AiToolLog {
   createdAt: string;
 }
 
+export interface LocalDataInfo {
+  dataDir: string;
+  dbPath: string;
+  attachmentsPath: string;
+  dbSize: number;
+  attachmentCount: number;
+  attachmentBytes: number;
+}
+
+export interface BackupInfo {
+  path: string;
+  createdAt: string;
+  dbSize: number;
+  attachmentCount: number;
+  attachmentBytes: number;
+}
+
+export interface RestoreInfo {
+  message: string;
+  backupPath: string;
+  restoredAt: string;
+}
+
 export const api = {
   listProjects: (includeArchived = false) =>
     invoke<Project[]>("list_projects", { includeArchived }),
@@ -338,6 +361,12 @@ export const api = {
       templateId,
       targetPath,
     }),
+
+  localDataInfo: () => invoke<LocalDataInfo>("local_data_info"),
+  createBackup: (targetDir: string) =>
+    invoke<BackupInfo>("create_backup", { targetDir }),
+  restoreBackup: (backupDir: string) =>
+    invoke<RestoreInfo>("restore_backup", { backupDir }),
 
   getAiConfig: () => invoke<AiConfig | null>("get_ai_config"),
   saveAiConfig: (config: AiConfig) => invoke<AiConfig>("save_ai_config", { config }),

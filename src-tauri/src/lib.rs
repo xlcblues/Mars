@@ -5,7 +5,9 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
-use commands::{ai, analytics, attachments, dashboard, entries, projects, reports, AppState};
+use commands::{
+    ai, analytics, attachments, backup, dashboard, entries, projects, reports, AppState,
+};
 use core::attachments::Attachments;
 use core::db::Database;
 
@@ -29,10 +31,12 @@ pub fn run() {
             let attachments_root = app_data.join("attachments");
 
             let db = Database::open(&db_path)?;
-            let attachments = Attachments::new(attachments_root)?;
+            let attachments = Attachments::new(attachments_root.clone())?;
             app.manage(AppState {
                 db: Mutex::new(db),
                 attachments,
+                db_path,
+                attachments_root,
             });
             Ok(())
         })
@@ -60,6 +64,9 @@ pub fn run() {
             attachments::list_attachments,
             attachments::open_attachment,
             attachments::delete_attachment,
+            backup::local_data_info,
+            backup::create_backup,
+            backup::restore_backup,
             dashboard::dashboard_summary,
             dashboard::week_trend,
             dashboard::project_overview,

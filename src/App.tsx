@@ -7,6 +7,7 @@ import { EntriesView } from "./features/entries/EntriesView";
 import { AnalyticsView } from "./features/analytics/AnalyticsView";
 import { ReportsView } from "./features/reports/ReportsView";
 import AiView from "./features/ai/AiView";
+import { SettingsView } from "./features/settings/SettingsView";
 import { PlaceholderView } from "./features/PlaceholderView";
 import { EntryModal } from "./components/EntryModal";
 import type { Project } from "./lib/api";
@@ -18,6 +19,7 @@ import "./styles/features.css";
 import "./styles/analytics.css";
 import "./styles/reports.css";
 import "./styles/ai.css";
+import "./styles/settings.css";
 
 function App() {
   const [view, setView] = useState<ViewId>("today");
@@ -47,7 +49,7 @@ function App() {
       <TitleBar view={view} />
       <div className="app-body">
         <Sidebar active={view} onSelect={setView} onQuickRecord={() => setQuickOpen(true)} />
-        <main className="app-main">
+        <main className={view === "today" ? "app-main today-main" : "app-main"}>
           {view === "today" ? (
             <TodayView refreshKey={refreshKey} onQuickRecord={() => setQuickOpen(true)} />
           ) : view === "projects" ? (
@@ -60,6 +62,8 @@ function App() {
             <ReportsView />
           ) : view === "ai" ? (
             <AiView />
+          ) : view === "settings" ? (
+            <SettingsView onRestored={bumpRefresh} />
           ) : (
             <PlaceholderView view={view} onBackToToday={() => setView("today")} />
           )}
