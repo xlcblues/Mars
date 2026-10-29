@@ -48,7 +48,7 @@ pub struct Attachment {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkEntryInput {
     pub id: Option<i64>,
@@ -142,6 +142,36 @@ pub struct ReportTemplateInput {
     pub template_type: String,
     pub blocks: Vec<TemplateBlock>,
     pub is_default: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSessionMeta {
+    pub id: i64,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSession {
+    pub id: i64,
+    pub title: String,
+    pub messages_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiToolLog {
+    pub id: i64,
+    pub session_id: Option<String>,
+    pub tool_name: String,
+    pub args_json: Option<String>,
+    pub status: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -283,6 +313,166 @@ impl Database {
                 ",
             )?;
         }
+        if version < 2 {
+            self.conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS ai_sessions (
+                  id INTEGER PRIMARY KEY,
+                  title TEXT NOT NULL,
+                  messages_json TEXT NOT NULL,
+                  created_at TEXT DEFAULT (datetime('now')),
+                  updated_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_ai_sessions_updated ON ai_sessions(updated_at DESC);
+                PRAGMA user_version = 2;
+                ",
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>, AppError> {
+        self.conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<(), AppError> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_ai_sessions(&self) -> Result<Vec<AiSessionMeta>, AppError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, created_at, updated_at
+             FROM ai_sessions
+             ORDER BY updated_at DESC, id DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(AiSessionMeta {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                created_at: row.get(2)?,
+                updated_at: row.get(3)?,
+            })
+        })?;
+        let mut sessions = Vec::new();
+        for row in rows {
+            sessions.push(row?);
+        }
+        Ok(sessions)
+    }
+
+    pub fn get_ai_session(&self, id: i64) -> Result<Option<AiSession>, AppError> {
+        self.conn
+            .query_row(
+                "SELECT id, title, messages_json, created_at, updated_at
+                 FROM ai_sessions WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(AiSession {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        messages_json: row.get(2)?,
+                        created_at: row.get(3)?,
+                        updated_at: row.get(4)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn save_ai_session(
+        &self,
+        id: Option<i64>,
+        title: &str,
+        messages_json: &str,
+    ) -> Result<AiSession, AppError> {
+        if let Some(session_id) = id {
+            let changed = self.conn.execute(
+                "UPDATE ai_sessions SET title = ?1, messages_json = ?2,
+                 updated_at = datetime('now') WHERE id = ?3",
+                params![title, messages_json, session_id],
+            )?;
+            if changed == 0 {
+                return Err(AppError("会话不存在".into()));
+            }
+            self.get_ai_session(session_id)?
+                .ok_or_else(|| AppError("保存会话后读取失败".into()))
+        } else {
+            self.conn.execute(
+                "INSERT INTO ai_sessions (title, messages_json, created_at, updated_at)
+                 VALUES (?1, ?2, datetime('now'), datetime('now'))",
+                params![title, messages_json],
+            )?;
+            let session_id = self.conn.last_insert_rowid();
+            self.get_ai_session(session_id)?
+                .ok_or_else(|| AppError("保存会话后读取失败".into()))
+        }
+    }
+
+    pub fn delete_ai_session(&self, id: i64) -> Result<bool, AppError> {
+        let changed = self
+            .conn
+            .execute("DELETE FROM ai_sessions WHERE id = ?1", params![id])?;
+        Ok(changed > 0)
+    }
+
+    pub fn list_ai_tool_logs(&self, limit: i64) -> Result<Vec<AiToolLog>, AppError> {
+        let limit = limit.clamp(1, 500);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, session_id, tool_name, args_json, status, created_at
+             FROM ai_tool_logs
+             ORDER BY id DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(AiToolLog {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                tool_name: row.get(2)?,
+                args_json: row.get(3)?,
+                status: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut logs = Vec::new();
+        for row in rows {
+            logs.push(row?);
+        }
+        Ok(logs)
+    }
+
+    pub fn log_ai_tool(
+        &self,
+        session_id: Option<&str>,
+        tool_name: &str,
+        args_json: Option<&str>,
+        status: &str,
+    ) -> Result<i64, AppError> {
+        self.conn.execute(
+            "INSERT INTO ai_tool_logs (session_id, tool_name, args_json, status, created_at)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+            params![session_id, tool_name, args_json, status],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn update_ai_tool_status(&self, id: i64, status: &str) -> Result<(), AppError> {
+        self.conn.execute(
+            "UPDATE ai_tool_logs SET status = ?1 WHERE id = ?2",
+            params![status, id],
+        )?;
         Ok(())
     }
 

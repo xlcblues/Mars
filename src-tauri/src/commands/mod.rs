@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod analytics;
 pub mod attachments;
 pub mod dashboard;

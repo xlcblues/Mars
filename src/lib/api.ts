@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 
 export interface Project {
   id: number;
@@ -156,6 +156,91 @@ export interface ReportRender {
   projects: ReportProjectItem[];
 }
 
+export interface AiConfig {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export interface AiChatMessage {
+  role: string;
+  content: string;
+}
+
+export interface AiActionSaveEntry {
+  type: "saveEntry";
+  entry: WorkEntryInput;
+}
+
+export interface AiActionDeleteEntry {
+  type: "deleteEntry";
+  id: number;
+}
+
+export interface AiActionCreateProject {
+  type: "createProject";
+  name: string;
+  color?: string | null;
+}
+
+export interface AiActionArchiveProject {
+  type: "archiveProject";
+  id: number;
+}
+
+export type AiAction =
+  | AiActionSaveEntry
+  | AiActionDeleteEntry
+  | AiActionCreateProject
+  | AiActionArchiveProject;
+
+export interface AiChatResponse {
+  text: string;
+  actions: AiAction[];
+}
+
+export interface AiApplyResult {
+  applied: number;
+  message: string;
+}
+
+export interface AiStreamEventDelta {
+  type: "delta";
+  text: string;
+}
+
+export interface AiStreamEventDone {
+  type: "done";
+  actions: AiAction[];
+}
+
+export type AiStreamEvent = AiStreamEventDelta | AiStreamEventDone;
+
+export interface AiSessionMeta {
+  id: number;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiSession {
+  id: number;
+  title: string;
+  messagesJson: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiToolLog {
+  id: number;
+  sessionId: string | null;
+  toolName: string;
+  argsJson: string | null;
+  status: string;
+  createdAt: string;
+}
+
 export const api = {
   listProjects: (includeArchived = false) =>
     invoke<Project[]>("list_projects", { includeArchived }),
@@ -253,6 +338,27 @@ export const api = {
       templateId,
       targetPath,
     }),
+
+  getAiConfig: () => invoke<AiConfig | null>("get_ai_config"),
+  saveAiConfig: (config: AiConfig) => invoke<AiConfig>("save_ai_config", { config }),
+  testAiConnection: () => invoke<string>("test_ai_connection"),
+  listAiSessions: () => invoke<AiSessionMeta[]>("list_ai_sessions"),
+  getAiSession: (id: number) => invoke<AiSession | null>("get_ai_session", { id }),
+  saveAiSession: (id: number | null, title: string, messagesJson: string) =>
+    invoke<AiSession>("save_ai_session", { id, title, messagesJson }),
+  deleteAiSession: (id: number) => invoke<boolean>("delete_ai_session", { id }),
+  listAiToolLogs: (limit = 50) => invoke<AiToolLog[]>("list_ai_tool_logs", { limit }),
+  aiApplyActions: (sessionId: string | null, actions: AiAction[]) =>
+    invoke<AiApplyResult>("ai_apply_actions", { sessionId, actions }),
+  aiChatStream: (
+    prompt: string,
+    history: AiChatMessage[],
+    onEvent: (event: AiStreamEvent) => void,
+  ) => {
+    const channel = new Channel<AiStreamEvent>();
+    channel.onmessage = onEvent;
+    return invoke<AiChatResponse>("ai_chat_stream", { prompt, history, channel });
+  },
 };
 
 export function formatMinutes(minutes: number): string {

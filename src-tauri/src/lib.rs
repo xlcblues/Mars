@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use tauri::Manager;
 
-use commands::{analytics, attachments, dashboard, entries, projects, reports, AppState};
+use commands::{ai, analytics, attachments, dashboard, entries, projects, reports, AppState};
 use core::attachments::Attachments;
 use core::db::Database;
 
@@ -38,6 +38,16 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            ai::get_ai_config,
+            ai::save_ai_config,
+            ai::test_ai_connection,
+            ai::list_ai_sessions,
+            ai::get_ai_session,
+            ai::save_ai_session,
+            ai::delete_ai_session,
+            ai::list_ai_tool_logs,
+            ai::ai_apply_actions,
+            ai::ai_chat_stream,
             projects::list_projects,
             projects::create_project,
             projects::update_project,

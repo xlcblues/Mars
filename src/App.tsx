@@ -6,6 +6,7 @@ import { ProjectsView } from "./features/projects/ProjectsView";
 import { EntriesView } from "./features/entries/EntriesView";
 import { AnalyticsView } from "./features/analytics/AnalyticsView";
 import { ReportsView } from "./features/reports/ReportsView";
+import AiView from "./features/ai/AiView";
 import { PlaceholderView } from "./features/PlaceholderView";
 import { EntryModal } from "./components/EntryModal";
 import type { Project } from "./lib/api";
@@ -16,6 +17,7 @@ import "./styles/today.css";
 import "./styles/features.css";
 import "./styles/analytics.css";
 import "./styles/reports.css";
+import "./styles/ai.css";
 
 function App() {
   const [view, setView] = useState<ViewId>("today");
@@ -56,6 +58,8 @@ function App() {
             <AnalyticsView />
           ) : view === "reports" ? (
             <ReportsView />
+          ) : view === "ai" ? (
+            <AiView />
           ) : (
             <PlaceholderView view={view} onBackToToday={() => setView("today")} />
           )}
