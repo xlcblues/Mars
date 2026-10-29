@@ -179,6 +179,7 @@ pub struct AiToolLog {
 pub struct ReportDayItem {
     pub date: String,
     pub title: String,
+    pub content: Option<String>,
     pub project_name: Option<String>,
     pub minutes: i64,
     pub tags: Option<String>,
@@ -1272,7 +1273,8 @@ impl Database {
                     CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
                       THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60
                       ELSE 0 END,
-                    e.tags
+                    e.tags,
+                    e.content
              FROM work_entries e
              LEFT JOIN projects p ON p.id = e.project_id
              WHERE e.work_date BETWEEN ?1 AND ?2
@@ -1285,6 +1287,7 @@ impl Database {
                 project_name: row.get(2)?,
                 minutes: row.get(3)?,
                 tags: row.get(4)?,
+                content: row.get(5)?,
             })
         })?;
         for row in rows {
@@ -1344,6 +1347,13 @@ impl Database {
         }
         if days.is_empty() {
             notices.push("该时间段内没有工作记录".into());
+        } else if missing_days.is_empty() && unlinked == 0 {
+            notices.push(format!(
+                "记录完整：{} 天共 {} 条，专注 {} 分钟",
+                active_days,
+                days.len(),
+                total_minutes
+            ));
         }
 
         let content = self.render_markdown(&template, &stats, &days, &projects, &notices);
@@ -1403,20 +1413,36 @@ impl Database {
                     if days.is_empty() {
                         out.push_str("（暂无记录）\n\n");
                     } else {
-                        let mut current = String::new();
+                        let mut group_keys: Vec<String> = Vec::new();
                         for d in days {
-                            if d.date != current {
-                                current = d.date.clone();
-                                out.push_str(&format!("### {}\n\n", d.date));
-                            }
-                            let project = d
+                            let key = d
                                 .project_name
-                                .as_deref()
-                                .map(|name| format!(" `{name}`"))
-                                .unwrap_or_default();
-                            out.push_str(&format!("- {}（{} 分钟）{}\n", d.title, d.minutes, project));
+                                .clone()
+                                .unwrap_or_else(|| "未关联项目".to_string());
+                            if !group_keys.contains(&key) {
+                                group_keys.push(key);
+                            }
                         }
-                        out.push('\n');
+                        for key in group_keys {
+                            out.push_str(&format!("### {}\n\n", key));
+                            for d in days.iter().filter(|d| {
+                                d.project_name.as_deref().unwrap_or("未关联项目") == key.as_str()
+                            }) {
+                                out.push_str("- ");
+                                out.push_str(&d.title);
+                                if let Some(content) = d.content.as_deref() {
+                                    let content = content.trim();
+                                    if !content.is_empty() {
+                                        out.push_str(&format!("：{}", content.replace('\n', " ")));
+                                    }
+                                }
+                                if d.minutes > 0 {
+                                    out.push_str(&format!("（{} 分钟）", d.minutes));
+                                }
+                                out.push('\n');
+                            }
+                            out.push('\n');
+                        }
                     }
                 }
                 "project_summary" => {
@@ -1909,6 +1935,30 @@ mod tests {
             .unwrap();
         assert!(empty.notices.iter().any(|n| n.contains("没有工作记录")));
         assert!(empty.content.contains("暂无记录"));
+    }
+
+    #[test]
+    fn report_notice_complete_summary() {
+        let db = db();
+        let project = db.create_project("数据看板", Some("#2E8B8B")).unwrap();
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project.id),
+            work_date: "2026-10-21".into(),
+            started_at: Some("09:00".into()),
+            ended_at: Some("10:00".into()),
+            title: "梳理指标口径".into(),
+            content: Some("对齐项目数据口径。".into()),
+            tags: Some("分析".into()),
+        })
+        .unwrap();
+
+        let render = db
+            .render_report("daily", "2026-10-21", "2026-10-21", None)
+            .unwrap();
+        assert!(render.notices.iter().any(|n| n.contains("记录完整")));
+        assert!(render.content.contains("### 数据看板"));
+        assert!(render.content.contains("- 数据看板：60 分钟 / 1 条"));
     }
 
     #[test]

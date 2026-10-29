@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
 import {
   Activity,
   CalendarDays,
   Clock3,
-  Download,
   NotebookPen,
   X,
 } from "lucide-react";
@@ -15,9 +13,15 @@ import type {
   Project,
   ProjectShare,
 } from "../../lib/api";
-import { api, fileNameFromPath, formatMinutes, todayDateString } from "../../lib/api";
+import { api, formatMinutes, todayDateString } from "../../lib/api";
 
 const WEEKDAY_LABELS = ["一", "二", "三", "四", "五", "六", "日"];
+const TREND_WINDOWS = [
+  { days: 7, label: "7天" },
+  { days: 14, label: "14天" },
+  { days: 30, label: "30天" },
+  { days: 0, label: "全部" },
+];
 
 interface HeatCell {
   date: string;
@@ -111,8 +115,7 @@ export function AnalyticsView() {
   const [share, setShare] = useState<ProjectShare[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState<"csv" | "json" | null>(null);
-  const [exportNote, setExportNote] = useState("");
+  const [trendDays, setTrendDays] = useState(7);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -150,14 +153,16 @@ export function AnalyticsView() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!exportNote) return;
-    const timer = window.setTimeout(() => setExportNote(""), 4000);
-    return () => window.clearTimeout(timer);
-  }, [exportNote]);
-
+  const visibleTrend = useMemo(
+    () => (trendDays > 0 ? trend.slice(-trendDays) : trend),
+    [trend, trendDays],
+  );
   const heatWeeks = useMemo(() => buildHeatWeeks(trend), [trend]);
   const heatMax = useMemo(() => Math.max(...trend.map((point) => point.minutes), 1), [trend]);
+  const trendMax = useMemo(
+    () => Math.max(...visibleTrend.map((point) => point.minutes), 1),
+    [visibleTrend],
+  );
   const today = todayDateString();
 
   function setField<K extends keyof AnalyticsFilters>(key: K, value: AnalyticsFilters[K]) {
@@ -166,23 +171,6 @@ export function AnalyticsView() {
 
   function resetFilters() {
     setFilters(monthRange());
-  }
-
-  async function exportData(format: "csv" | "json") {
-    try {
-      const path = await save({
-        defaultPath: `mars-analytics-${filters.startDate || "all"}-${filters.endDate || "all"}.${format}`,
-        filters: [{ name: format.toUpperCase(), extensions: [format] }],
-      });
-      if (!path) return;
-      setExporting(format);
-      await api.exportAnalytics(format, normalizeFilters(filters), path);
-      setExportNote(`已导出 ${fileNameFromPath(path)}`);
-    } catch (err) {
-      setExportNote(`导出失败：${String(err)}`);
-    } finally {
-      setExporting(null);
-    }
   }
 
   const rangeLabel =
@@ -220,27 +208,6 @@ export function AnalyticsView() {
           <p className="page-kicker">数据分析</p>
           <h1>分析</h1>
           <p className="page-sub">从时长、趋势与分布里看清时间的去向。</p>
-        </div>
-        <div className="page-actions">
-          {exportNote && <span className="export-note">{exportNote}</span>}
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => void exportData("csv")}
-            disabled={exporting !== null}
-          >
-            <Download size={16} strokeWidth={1.9} />
-            <span>{exporting === "csv" ? "导出中" : "导出 CSV"}</span>
-          </button>
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => void exportData("json")}
-            disabled={exporting !== null}
-          >
-            <Download size={16} strokeWidth={1.9} />
-            <span>{exporting === "json" ? "导出中" : "导出 JSON"}</span>
-          </button>
         </div>
       </div>
 
@@ -312,14 +279,28 @@ export function AnalyticsView() {
         <section className="card" aria-label="每日趋势">
           <div className="card-head">
             <h2>每日趋势</h2>
-            <span className="card-count">{rangeLabel}</span>
+            <div className="card-head-tools">
+              <div className="trend-period" role="group" aria-label="趋势周期">
+                {TREND_WINDOWS.map((window) => (
+                  <button
+                    type="button"
+                    key={window.days}
+                    className={`period-btn${trendDays === window.days ? " active" : ""}`}
+                    onClick={() => setTrendDays(window.days)}
+                  >
+                    {window.label}
+                  </button>
+                ))}
+              </div>
+              <span className="card-count">{rangeLabel}</span>
+            </div>
           </div>
-          {trend.length === 0 ? (
+          {visibleTrend.length === 0 ? (
             <p className="empty-inline">{loading ? "加载中…" : "当前条件下没有数据"}</p>
           ) : (
             <div className="analytics-trend-scroll">
               <div className="analytics-trend">
-                {trend.map((point) => (
+                {visibleTrend.map((point) => (
                   <div
                     className="trend-col"
                     key={point.date}
@@ -329,7 +310,7 @@ export function AnalyticsView() {
                       <div
                         className={`trend-bar${point.date === today ? " today" : ""}`}
                         style={{
-                          height: `${Math.max((point.minutes / heatMax) * 100, point.minutes > 0 ? 8 : 2)}%`,
+                          height: `${Math.max((point.minutes / trendMax) * 100, point.minutes > 0 ? 8 : 2)}%`,
                         }}
                       />
                     </div>

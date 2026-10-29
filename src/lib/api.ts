@@ -129,6 +129,7 @@ export interface ReportTemplateInput {
 export interface ReportDayItem {
   date: string;
   title: string;
+  content: string | null;
   projectName: string | null;
   minutes: number;
   tags: string | null;
