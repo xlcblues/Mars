@@ -24,38 +24,45 @@
 }
 
 .trend-period {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg-subtle);
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-subtle) 66%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .period-btn {
-  height: 24px;
-  padding: 0 10px;
+  height: 26px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
   font-size: 12px;
-  line-height: 24px;
+  line-height: 20px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  white-space: nowrap;
+  transition: color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
 }
 
 .period-btn:hover {
-  color: var(--text);
+  color: var(--accent-ink);
 }
 
 .period-btn.active {
   background: var(--bg-raised);
-  color: var(--accent-ink);
+  color: var(--text);
   font-weight: 600;
-  box-shadow: var(--shadow-1);
+  box-shadow: 0 1px 2px rgba(43, 26, 19, 0.08), 0 4px 12px rgba(43, 26, 19, 0.06);
+}
+
+[data-theme="dark"] .period-btn.active {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 4px 12px rgba(0, 0, 0, 0.24);
 }
 
 .analytics-trend-scroll {
@@ -64,6 +71,15 @@
   display: flex;
   overflow-x: auto;
   padding-bottom: 2px;
+}
+
+.analytics-trend-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.analytics-trend-scroll::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--line-strong);
 }
 
 .analytics-trend {
@@ -77,13 +93,31 @@
 }
 
 .analytics-trend .trend-col {
-  flex: 1 1 28px;
-  min-width: 28px;
+  flex: 1 1 30px;
+  min-width: 24px;
   height: 100%;
 }
 
+.analytics-trend[data-days="7"] .trend-col {
+  flex: 1 1 64px;
+  min-width: 56px;
+}
+
+.analytics-trend[data-days="14"] .trend-col {
+  flex: 1 1 44px;
+  min-width: 38px;
+}
+
 .analytics-trend .trend-bar {
-  width: 14px;
+  width: 12px;
+}
+
+.analytics-trend[data-days="7"] .trend-bar {
+  width: 22px;
+}
+
+.analytics-trend[data-days="14"] .trend-bar {
+  width: 17px;
 }
 
 .heatmap-card {
@@ -139,17 +173,19 @@
   aspect-ratio: 1;
   min-width: 0;
   border-radius: 6px;
-  background: var(--bg-subtle);
+  background: color-mix(in srgb, var(--bg-subtle) 52%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
   transition: transform 100ms ease, box-shadow 120ms ease;
 }
 
 .heat-cell:hover {
   transform: scale(1.08);
-  box-shadow: var(--shadow-1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), var(--shadow-1);
 }
 
 .heat-cell.active {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22),
+    0 1px 2px rgba(43, 26, 19, 0.08);
 }
 
 .heat-cell.muted {
@@ -171,6 +207,8 @@
   width: 12px;
   height: 12px;
   border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
 .legend-swatch.low {
@@ -187,6 +225,18 @@
 
 [data-theme="dark"] .legend-swatch.mid {
   background: rgba(255, 107, 61, 0.55);
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .trend-period {
+    background: var(--bg-subtle);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heat-cell:hover {
+    transform: none;
+  }
 }
 
 @media (max-width: 1180px) {

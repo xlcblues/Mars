@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  ArrowUpRight,
   Check,
-  History,
   Loader2,
   MessageSquare,
   Plus,
-  RefreshCw,
   Send,
   Settings,
   Sparkles,
@@ -21,7 +20,6 @@ import type {
   AiChatMessage,
   AiConfig,
   AiSessionMeta,
-  AiToolLog,
 } from "../../lib/api";
 
 const SUGGESTIONS = [
@@ -56,15 +54,6 @@ function parseMessages(json: string): AiChatMessage[] {
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
-  }
-}
-
-function formatArgs(raw: string | null): string {
-  if (!raw) return "";
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 1);
-  } catch {
-    return raw;
   }
 }
 
@@ -217,7 +206,6 @@ function AiView() {
   const [applying, setApplying] = useState(false);
   const [applyNotice, setApplyNotice] = useState<ApplyNotice | null>(null);
   const [error, setError] = useState("");
-  const [logs, setLogs] = useState<AiToolLog[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -231,7 +219,6 @@ function AiView() {
       })
       .catch(() => {});
     api.listAiSessions().then(setSessions).catch(() => {});
-    api.listAiToolLogs(50).then(setLogs).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -242,10 +229,6 @@ function AiView() {
 
   function refreshSessions() {
     api.listAiSessions().then(setSessions).catch(() => {});
-  }
-
-  function refreshLogs() {
-    api.listAiToolLogs(50).then(setLogs).catch(() => {});
   }
 
   function newSession() {
@@ -404,7 +387,7 @@ function AiView() {
   }
 
   return (
-    <div className="ai-view">
+    <div className="ai-view content">
       <header className="ai-head">
         <div>
           <div className="ai-kicker">
@@ -415,6 +398,10 @@ function AiView() {
           <p className="ai-sub">对话式工作记录与报告助手</p>
         </div>
         <div className="ai-head-actions">
+          <span className="ai-model-chip" title={config?.model || "尚未配置模型"}>
+            <span className="ai-model-dot" />
+            <span className="ai-model-name">{config?.model || "未配置 AI"}</span>
+          </span>
           <button className="icon-btn" onClick={openSettings} title="AI 设置" aria-label="AI 设置">
             <Settings size={17} />
           </button>
@@ -436,7 +423,10 @@ function AiView() {
           </button>
           <div className="ai-session-list">
             {sessions.length === 0 ? (
-              <div className="ai-empty">暂无会话</div>
+              <div className="ai-empty">
+                <MessageSquare size={16} />
+                <span>暂无会话</span>
+              </div>
             ) : (
               sessions.map((session) => (
                 <div
@@ -496,7 +486,8 @@ function AiView() {
                       disabled={streaming}
                       onClick={() => sendMessage(suggestion)}
                     >
-                      {suggestion}
+                      <span>{suggestion}</span>
+                      <ArrowUpRight size={14} strokeWidth={1.8} />
                     </button>
                   ))}
                 </div>
@@ -508,7 +499,16 @@ function AiView() {
                     key={index}
                     className={`ai-msg ${msg.role === "user" ? "user" : "assistant"}`}
                   >
-                    <span className="ai-msg-role">{msg.role === "user" ? "你" : "AI"}</span>
+                    <span className={`ai-msg-role ${msg.role}`}>
+                      {msg.role === "user" ? (
+                        "你"
+                      ) : (
+                        <>
+                          <Sparkles size={11} />
+                          AI
+                        </>
+                      )}
+                    </span>
                     {msg.role === "user" ? (
                       <div className="ai-bubble">{msg.content}</div>
                     ) : (
@@ -520,7 +520,10 @@ function AiView() {
                 ))}
                 {streaming && (
                   <div className="ai-msg assistant">
-                    <span className="ai-msg-role">AI</span>
+                    <span className="ai-msg-role assistant">
+                      <Sparkles size={11} />
+                      AI
+                    </span>
                     <div className="ai-bubble">
                       {streamText ? (
                         <div className="ai-markdown">{renderMarkdown(streamText)}</div>
@@ -614,37 +617,6 @@ function AiView() {
           </form>
         </section>
 
-        <aside className="ai-panel ai-log-panel">
-          <div className="ai-panel-head">
-            <span className="ai-panel-title">
-              <History size={15} />
-              工具日志
-            </span>
-            <div className="ai-panel-actions">
-              <button className="icon-btn" onClick={refreshLogs} title="刷新日志" aria-label="刷新日志">
-                <RefreshCw size={15} />
-              </button>
-            </div>
-          </div>
-          <div className="ai-log-list">
-            {logs.length === 0 ? (
-              <div className="ai-empty">暂无工具调用记录</div>
-            ) : (
-              logs.map((log) => (
-                <div className="ai-log-item" key={log.id}>
-                  <div className="ai-log-head">
-                    <span className="ai-log-name">{log.toolName}</span>
-                    <span className={`ai-log-status ${log.status}`}>
-                      {log.status === "success" ? "成功" : "失败"}
-                    </span>
-                  </div>
-                  <div className="ai-log-time">{formatTime(log.createdAt)}</div>
-                  {log.argsJson && <div className="ai-log-args">{formatArgs(log.argsJson)}</div>}
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
       </div>
 
       {settingsOpen && (

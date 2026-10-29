@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { Archive, Check, FolderOpen, Pencil, Plus, RotateCcw, X } from "lucide-react";
+import {
+  Archive,
+  Check,
+  FolderKanban,
+  FolderOpen,
+  FolderPlus,
+  Pencil,
+  Plus,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import type { Project } from "../../lib/api";
 import { api } from "../../lib/api";
 
@@ -91,7 +101,14 @@ export function ProjectsView() {
 
       <section className="panel create-panel">
         <div className="panel-head">
-          <h2>{showArchived ? "归档项目" : "新建项目"}</h2>
+          <h2>
+            {showArchived ? (
+              <Archive size={15} strokeWidth={1.9} />
+            ) : (
+              <FolderPlus size={15} strokeWidth={1.9} />
+            )}
+            {showArchived ? "归档项目" : "新建项目"}
+          </h2>
         </div>
         {showArchived ? (
           <div className="project-list">
@@ -148,7 +165,14 @@ export function ProjectsView() {
 
       <section className="panel">
         <div className="panel-head">
-          <h2>{showArchived ? "归档列表" : "全部项目"}</h2>
+          <h2>
+            {showArchived ? (
+              <Archive size={15} strokeWidth={1.9} />
+            ) : (
+              <FolderKanban size={15} strokeWidth={1.9} />
+            )}
+            {showArchived ? "归档列表" : "全部项目"}
+          </h2>
           <span className="card-count">{list.length} 个</span>
         </div>
         <div className="project-list">

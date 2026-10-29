@@ -299,7 +299,7 @@ export function AnalyticsView() {
             <p className="empty-inline">{loading ? "加载中…" : "当前条件下没有数据"}</p>
           ) : (
             <div className="analytics-trend-scroll">
-              <div className="analytics-trend">
+            <div className="analytics-trend" data-days={trendDays}>
                 {visibleTrend.map((point) => (
                   <div
                     className="trend-col"

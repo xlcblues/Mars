@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Paperclip, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ListChecks, Paperclip, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { Project, WorkEntry } from "../../lib/api";
 import { api, currentWeekRange, formatMinutes, todayDateString } from "../../lib/api";
 import { EntryModal } from "../../components/EntryModal";
@@ -153,7 +153,10 @@ export function EntriesView({ refreshKey }: EntriesViewProps) {
 
       <section className="panel">
         <div className="panel-head">
-          <h2>记录列表</h2>
+          <h2>
+            <ListChecks size={15} strokeWidth={1.9} />
+            记录列表
+          </h2>
           <span className="card-count">
             {entries.length} 条 · 合计 {formatMinutes(totalMinutes)}
           </span>

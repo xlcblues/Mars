@@ -3,8 +3,12 @@ import { save } from "@tauri-apps/plugin-dialog";
 import {
   ArrowDown,
   ArrowUp,
+  CalendarCheck,
   CalendarRange,
+  ChevronDown,
+  Clock,
   Download,
+  FolderKanban,
   LayoutTemplate,
   Loader2,
   Plus,
@@ -75,6 +79,7 @@ export function ReportsView() {
   const [draftDefault, setDraftDefault] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const reportTypeLabel = reportType === "weekly" ? "周报" : "日报";
 
@@ -143,6 +148,16 @@ export function ReportsView() {
     const timer = window.setTimeout(() => setNote(""), 4000);
     return () => window.clearTimeout(timer);
   }, [note]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".template-picker")) setPickerOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [pickerOpen]);
 
   function openNewDesigner() {
     setEditingTemplate(null);
@@ -266,7 +281,7 @@ export function ReportsView() {
   const rangeLabel = `${startDate} 至 ${endDate}`;
 
   return (
-    <div className="content">
+    <div className="content reports-view">
       <div className="page-head">
         <div>
           <p className="page-kicker">日报周报</p>
@@ -328,34 +343,55 @@ export function ReportsView() {
         <div className="report-template-select">
           <label>
             <span>使用模板</span>
-            <select
-              value={activeTemplateId ?? ""}
-              onChange={(e) => {
-                const id = e.target.value ? Number(e.target.value) : null;
-                setActiveTemplateId(id);
-                void doRender(reportType, startDate, endDate, id);
-              }}
-            >
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>
-                  {template.name}
-                  {template.isDefault ? " · 默认" : ""}
-                </option>
-              ))}
-            </select>
+            <div className="template-select-row">
+              <div className="template-picker">
+                <button
+                  type="button"
+                  className={`template-picker-btn${pickerOpen ? " open" : ""}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={pickerOpen}
+                  onClick={() => setPickerOpen((open) => !open)}
+                >
+                  <span className="template-picker-value">{activeTemplate?.name ?? "选择模板"}</span>
+                  {activeTemplate?.isDefault && <span className="template-picker-tag">默认</span>}
+                  <ChevronDown size={15} strokeWidth={1.9} />
+                </button>
+                {pickerOpen && (
+                  <div className="template-picker-menu" role="listbox">
+                    {templates.map((template) => (
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={template.id === activeTemplateId}
+                        className={`template-picker-option${template.id === activeTemplateId ? " active" : ""}`}
+                        key={template.id}
+                        onClick={() => {
+                          setActiveTemplateId(template.id);
+                          void doRender(reportType, startDate, endDate, template.id);
+                          setPickerOpen(false);
+                        }}
+                      >
+                        <span className="template-picker-name">{template.name}</span>
+                        {template.isDefault && <span className="template-picker-tag">默认</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="template-menu">
+                {activeTemplate && (
+                  <button type="button" className="text-btn" onClick={() => openEditDesigner(activeTemplate)}>
+                    <LayoutTemplate size={14} strokeWidth={1.9} />
+                    <span>编辑模板</span>
+                  </button>
+                )}
+                <button type="button" className="secondary-btn" onClick={openNewDesigner}>
+                  <Plus size={15} strokeWidth={1.9} />
+                  <span>模板设计</span>
+                </button>
+              </div>
+            </div>
           </label>
-          <div className="template-menu">
-            {activeTemplate && (
-              <button type="button" className="text-btn" onClick={() => openEditDesigner(activeTemplate)}>
-                <LayoutTemplate size={14} strokeWidth={1.9} />
-                <span>编辑模板</span>
-              </button>
-            )}
-            <button type="button" className="secondary-btn" onClick={openNewDesigner}>
-              <Plus size={15} strokeWidth={1.9} />
-              <span>模板设计</span>
-            </button>
-          </div>
         </div>
       </section>
 
@@ -383,16 +419,25 @@ export function ReportsView() {
             {render ? (
               <div className="report-stats">
                 <div className="report-stat">
-                  <span>专注时长</span>
+                  <span className="report-stat-icon">
+                    <Clock size={15} strokeWidth={1.9} />
+                  </span>
                   <strong>{formatMinutes(render.stats.totalMinutes)}</strong>
+                  <span className="report-stat-label">专注时长</span>
                 </div>
                 <div className="report-stat">
-                  <span>有效天数</span>
+                  <span className="report-stat-icon">
+                    <CalendarCheck size={15} strokeWidth={1.9} />
+                  </span>
                   <strong>{render.stats.activeDays} 天</strong>
+                  <span className="report-stat-label">有效天数</span>
                 </div>
                 <div className="report-stat">
-                  <span>项目数</span>
+                  <span className="report-stat-icon">
+                    <FolderKanban size={15} strokeWidth={1.9} />
+                  </span>
                   <strong>{render.projects.length} 个</strong>
+                  <span className="report-stat-label">项目数</span>
                 </div>
               </div>
             ) : (
