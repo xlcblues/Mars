@@ -30,6 +30,8 @@ interface FormState {
   tags: string;
 }
 
+const PRESET_TAGS = ["开发", "测试", "运维", "设计", "会议", "文档", "联调", "学习"];
+
 function formFromEntry(entry?: WorkEntry | null, defaultDate?: string): FormState {
   return {
     title: entry?.title ?? "",
@@ -152,6 +154,24 @@ export function EntryModal({ projects, entry, defaultDate, onClose, onSaved }: E
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  function togglePresetTag(tag: string) {
+    setForm((prev) => {
+      const current = prev.tags
+        .split(/[,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const next = current.includes(tag)
+        ? current.filter((item) => item !== tag)
+        : [...current, tag];
+      return { ...prev, tags: next.join(",") };
+    });
+  }
+
+  const currentTags = form.tags
+    .split(/[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className={`modal${dragging ? " dragging" : ""}`}>
@@ -226,14 +246,26 @@ export function EntryModal({ projects, entry, defaultDate, onClose, onSaved }: E
               />
             </label>
 
-            <label className="form-field span-2">
+            <div className="form-field span-2">
               <span>标签</span>
               <input
                 value={form.tags}
                 onChange={(e) => setField("tags", e.target.value)}
                 placeholder="逗号分隔，例如：开发,联调"
               />
-            </label>
+              <div className="preset-tags">
+                {PRESET_TAGS.map((tag) => (
+                  <button
+                    type="button"
+                    className={`preset-tag${currentTags.includes(tag) ? " selected" : ""}`}
+                    key={tag}
+                    onClick={() => togglePresetTag(tag)}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
           <div className="attachment-zone">
