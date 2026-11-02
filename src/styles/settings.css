@@ -233,6 +233,103 @@
   }
 }
 
+.about-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 32px;
+  border-top: 1px solid var(--line);
+}
+
+.about-meta-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.about-meta-item:first-child,
+.about-meta-item:nth-child(2) {
+  border-top: 0;
+}
+
+.about-meta-item > span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.about-meta-item > strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.about-meta-item .about-status-error {
+  color: var(--danger);
+}
+
+.about-update-notes {
+  max-height: 96px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.about-update-progress {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-subtle);
+}
+
+.about-update-progress span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--primary);
+  transition: width 0.2s ease;
+}
+
+.about-update-progress.indeterminate span {
+  width: 38%;
+  animation: about-update-slide 1.2s ease-in-out infinite;
+}
+
+.about-update-actions {
+  margin-top: 4px;
+}
+
+.about-update-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+  word-break: break-word;
+}
+
+@keyframes about-update-slide {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
 @media (max-width: 720px) {
   .settings-data-list {
     grid-template-columns: 1fr;
@@ -244,5 +341,9 @@
 
   .restore-confirm {
     align-items: flex-start;
+  }
+
+  .about-meta {
+    grid-template-columns: 1fr;
   }
 }

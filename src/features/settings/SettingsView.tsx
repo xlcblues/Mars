@@ -5,22 +5,37 @@ import {
   CheckCircle2,
   Database,
   DatabaseBackup,
+  Download,
   FolderOpen,
   History,
+  Info,
   Loader2,
+  RefreshCw,
   RotateCcw,
   X,
 } from "lucide-react";
 import type { BackupInfo, LocalDataInfo, RestoreInfo } from "../../lib/api";
 import { api, formatFileSize } from "../../lib/api";
+import {
+  FALLBACK_VERSION,
+  type UpdaterState,
+} from "../../lib/updater";
 
 interface SettingsViewProps {
   onRestored: () => void;
+  updaterState: UpdaterState;
+  onCheckUpdate: () => void;
+  onInstallUpdate: () => void;
 }
 
 type Busy = "backup" | "restore" | null;
 
-export function SettingsView({ onRestored }: SettingsViewProps) {
+export function SettingsView({
+  onRestored,
+  updaterState,
+  onCheckUpdate,
+  onInstallUpdate,
+}: SettingsViewProps) {
   const [info, setInfo] = useState<LocalDataInfo | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [notice, setNotice] = useState<{
@@ -30,6 +45,31 @@ export function SettingsView({ onRestored }: SettingsViewProps) {
   const [pendingRestore, setPendingRestore] = useState<string | null>(null);
   const [lastBackup, setLastBackup] = useState<BackupInfo | null>(null);
   const [lastRestore, setLastRestore] = useState<RestoreInfo | null>(null);
+  const currentVersion = updaterState.currentVersion ?? FALLBACK_VERSION;
+  const updateBusy =
+    updaterState.status === "checking" ||
+    updaterState.status === "downloading" ||
+    updaterState.status === "installing";
+  let updateStatusText = "未检查";
+  if (updaterState.status === "checking") {
+    updateStatusText = "正在检查更新…";
+  } else if (updaterState.status === "latest") {
+    updateStatusText = "已是最新版本";
+  } else if (updaterState.status === "available") {
+    updateStatusText = `发现新版本 v${updaterState.version ?? ""}`;
+  } else if (updaterState.status === "downloading") {
+    updateStatusText =
+      updaterState.progress && updaterState.progress > 0
+        ? `已下载 ${updaterState.progress}%`
+        : `正在下载 v${updaterState.version ?? ""}`;
+  } else if (updaterState.status === "installing") {
+    updateStatusText = "正在安装，完成后自动重启";
+  } else if (updaterState.status === "error") {
+    updateStatusText =
+      updaterState.message === "unsupported"
+        ? "当前环境不支持在线更新"
+        : "检查更新失败";
+  }
 
   const loadInfo = useCallback(async () => {
     try {
@@ -266,6 +306,78 @@ export function SettingsView({ onRestored }: SettingsViewProps) {
           ) : (
             <p className="settings-copy">恢复会替换当前数据库与附件。</p>
           )}
+        </div>
+      </section>
+
+      <section className="panel settings-panel about-panel">
+        <div className="panel-head">
+          <h2>
+            <Info size={16} strokeWidth={1.9} />
+            关于与更新
+          </h2>
+          <span className="card-count">Mars v{currentVersion}</span>
+        </div>
+        <div className="settings-body">
+          <div className="about-meta">
+            <div className="about-meta-item">
+              <span>当前版本</span>
+              <strong>v{currentVersion}</strong>
+            </div>
+            <div className="about-meta-item">
+              <span>更新状态</span>
+              <strong
+                className={
+                  updaterState.status === "error" ? "about-status-error" : ""
+                }
+              >
+                {updateStatusText}
+              </strong>
+            </div>
+          </div>
+          {updaterState.status === "available" && updaterState.body ? (
+            <p className="about-update-notes">{updaterState.body}</p>
+          ) : null}
+          {updaterState.status === "downloading" ? (
+            <div
+              className={`about-update-progress${
+                updaterState.progress ? "" : " indeterminate"
+              }`}
+            >
+              <span style={{ width: `${updaterState.progress ?? 38}%` }} />
+            </div>
+          ) : null}
+          {updaterState.status === "error" &&
+          updaterState.message !== "unsupported" ? (
+            <p className="about-update-error">{updaterState.message}</p>
+          ) : null}
+          <div className="settings-actions about-update-actions">
+            <button
+              type="button"
+              className="secondary-btn"
+              disabled={updateBusy}
+              onClick={onCheckUpdate}
+            >
+              {updaterState.status === "checking" ? (
+                <Loader2 size={16} strokeWidth={2} className="spin" />
+              ) : (
+                <RefreshCw size={16} strokeWidth={1.9} />
+              )}
+              <span>
+                {updaterState.status === "checking" ? "检查中" : "检查更新"}
+              </span>
+            </button>
+            {updaterState.status === "available" ? (
+              <button
+                type="button"
+                className="primary-btn"
+                disabled={updateBusy}
+                onClick={onInstallUpdate}
+              >
+                <Download size={16} strokeWidth={1.9} />
+                <span>下载并安装</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       </section>
     </div>

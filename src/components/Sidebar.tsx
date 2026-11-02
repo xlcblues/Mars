@@ -12,6 +12,7 @@ import type { LucideIcon } from "lucide-react";
 import { LogoMark } from "./LogoMark";
 import { viewLabels } from "../lib/navigation";
 import type { ViewId } from "../lib/navigation";
+import { FALLBACK_VERSION } from "../lib/updater";
 
 interface SidebarProps {
   active: ViewId;
@@ -64,7 +65,7 @@ export function Sidebar({ active, onSelect, onQuickRecord }: SidebarProps) {
         </button>
         <div className="sidebar-meta">
           <span className="meta-dot" aria-hidden="true" />
-          <span>本地优先 · v0.1.0</span>
+          <span>本地优先 · v{FALLBACK_VERSION}</span>
         </div>
       </div>
     </aside>

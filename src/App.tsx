@@ -12,6 +12,7 @@ import { PlaceholderView } from "./features/PlaceholderView";
 import { EntryModal } from "./components/EntryModal";
 import type { Project } from "./lib/api";
 import { api, todayDateString } from "./lib/api";
+import { useUpdater } from "./lib/updater";
 import type { ViewId } from "./lib/navigation";
 import "./styles/app.css";
 import "./styles/today.css";
@@ -26,6 +27,7 @@ function App() {
   const [quickOpen, setQuickOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [projects, setProjects] = useState<Project[]>([]);
+  const updater = useUpdater();
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +65,12 @@ function App() {
           ) : view === "ai" ? (
             <AiView />
           ) : view === "settings" ? (
-            <SettingsView onRestored={bumpRefresh} />
+            <SettingsView
+              onRestored={bumpRefresh}
+              updaterState={updater.state}
+              onCheckUpdate={() => void updater.checkNow()}
+              onInstallUpdate={() => void updater.install()}
+            />
           ) : (
             <PlaceholderView view={view} onBackToToday={() => setView("today")} />
           )}
