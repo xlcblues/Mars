@@ -10,6 +10,9 @@
 
 .reports-view .page-actions {
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 780px;
 }
 
 .reports-view .reports-controls {
@@ -318,6 +321,19 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+
+.report-preview .card-head-titles {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.report-restore-btn {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-secondary);
 }
 
 .report-markdown {

@@ -1,4 +1,7 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 use chrono::{Datelike, Duration, Local, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -1490,15 +1493,28 @@ impl Database {
         end_date: &str,
         template_id: Option<i64>,
         target_path: &str,
+        content: Option<String>,
     ) -> Result<String, AppError> {
-        let rendered =
-            self.render_report(report_type, start_date, end_date, template_id)?;
-        let content = match format {
-            "md" | "markdown" => rendered.content,
-            "html" => markdown_to_html(&rendered),
-            _ => return Err(AppError("不支持的导出格式".into())),
+        let content = match content {
+            Some(text) => text,
+            None => self
+                .render_report(report_type, start_date, end_date, template_id)?
+                .content,
         };
-        std::fs::write(target_path, content).map_err(|err| AppError(format!("导出失败：{err}")))?;
+        match format {
+            "md" | "markdown" => {
+                std::fs::write(target_path, &content)
+                    .map_err(|err| AppError(format!("导出失败：{err}")))?;
+            }
+            "html" => {
+                std::fs::write(target_path, markdown_to_html_content(&content))
+                    .map_err(|err| AppError(format!("导出失败：{err}")))?;
+            }
+            "pdf" => {
+                write_pdf(&markdown_to_html_content(&content), target_path)?;
+            }
+            _ => return Err(AppError("不支持的导出格式".into())),
+        }
         Ok(target_path.to_string())
     }
 }
@@ -1559,31 +1575,148 @@ fn html_escape(input: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn markdown_to_html(render: &ReportRender) -> String {
+pub fn markdown_to_html_content(content: &str) -> String {
     let mut out = String::from("<!doctype html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\">\n");
     out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
     out.push_str("<title>Mars 工作报告</title>\n<style>\n");
-    out.push_str("body{font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;max-width:820px;margin:40px auto;padding:0 24px;color:#1c1917;line-height:1.7;}\n");
-    out.push_str("h1{font-size:26px;border-bottom:2px solid #e5e2df;padding-bottom:10px;}h2{margin-top:28px;font-size:18px;}h3{font-size:15px;}\n");
-    out.push_str("li{margin:4px 0;}blockquote{border-left:3px solid #d6d0cb;margin:0;padding-left:12px;color:#57534e;}\n");
+    out.push_str("@page{size:A4;margin:18mm;}\n");
+    out.push_str("html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}\n");
+    out.push_str("body{font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif;max-width:820px;margin:0 auto;padding:0;color:#1c1917;line-height:1.75;font-size:14px;}\n");
+    out.push_str("h1{font-size:26px;margin:0 0 18px;border-bottom:2px solid #e5e2df;padding-bottom:10px;}h2{margin:26px 0 12px;font-size:18px;}h3{margin:18px 0 10px;font-size:15px;}\n");
+    out.push_str("p{margin:0 0 10px;}ul{margin:8px 0 14px;padding-left:22px;}li{margin:4px 0;}blockquote{border-left:3px solid #d6d0cb;margin:12px 0;padding-left:12px;color:#57534e;}\n");
     out.push_str("</style>\n</head>\n<body>\n");
-    for line in render.content.lines() {
+    let mut in_list = false;
+    for line in content.lines() {
         if let Some(rest) = line.strip_prefix("# ") {
+            if in_list {
+                out.push_str("</ul>\n");
+                in_list = false;
+            }
             out.push_str(&format!("<h1>{}</h1>\n", html_escape(rest)));
         } else if let Some(rest) = line.strip_prefix("## ") {
+            if in_list {
+                out.push_str("</ul>\n");
+                in_list = false;
+            }
             out.push_str(&format!("<h2>{}</h2>\n", html_escape(rest)));
         } else if let Some(rest) = line.strip_prefix("### ") {
+            if in_list {
+                out.push_str("</ul>\n");
+                in_list = false;
+            }
             out.push_str(&format!("<h3>{}</h3>\n", html_escape(rest)));
         } else if let Some(rest) = line.strip_prefix("- ") {
+            if !in_list {
+                out.push_str("<ul>\n");
+                in_list = true;
+            }
             out.push_str(&format!("<li>{}</li>\n", html_escape(rest)));
         } else if line.trim().is_empty() {
+            if in_list {
+                out.push_str("</ul>\n");
+                in_list = false;
+            }
             out.push_str("<br>\n");
         } else {
+            if in_list {
+                out.push_str("</ul>\n");
+                in_list = false;
+            }
             out.push_str(&format!("<p>{}</p>\n", html_escape(line)));
         }
     }
+    if in_list {
+        out.push_str("</ul>\n");
+    }
     out.push_str("</body>\n</html>\n");
     out
+}
+
+fn write_pdf(html: &str, target_path: &str) -> Result<String, AppError> {
+    let temp_root = std::env::temp_dir().join(format!(
+        "mars-report-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(&temp_root)
+        .map_err(|err| AppError(format!("创建临时目录失败：{err}")))?;
+    let html_path = temp_root.join("report.html");
+    let pdf_path = temp_root.join("report.pdf");
+    let profile_path = temp_root.join("profile");
+    std::fs::write(&html_path, html)
+        .map_err(|err| AppError(format!("写入临时 HTML 失败：{err}")))?;
+
+    let browser =
+        find_browser().ok_or_else(|| AppError("未找到 Chrome 或 Edge，无法导出 PDF".into()))?;
+    let file_url = format!("file:///{}", html_path.display().to_string().replace('\\', "/"));
+    let mut succeeded = false;
+    for headless in ["--headless=new", "--headless"] {
+        let profile_arg = format!("--user-data-dir={}", profile_path.display());
+        let pdf_arg = format!("--print-to-pdf={}", pdf_path.display());
+        let mut cmd = std::process::Command::new(&browser);
+        cmd.args([
+            headless,
+            "--disable-gpu",
+            "--no-sandbox",
+            "--no-first-run",
+            "--disable-extensions",
+            &profile_arg,
+            "--print-to-pdf-no-header",
+            &pdf_arg,
+            &file_url,
+        ]);
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000);
+        let status = cmd.status();
+        let _ = std::fs::remove_dir_all(&profile_path);
+        let valid = pdf_path.exists()
+            && std::fs::read(&pdf_path)
+                .map(|bytes| bytes.starts_with(b"%PDF-"))
+                .unwrap_or(false);
+        if status.is_ok() && valid {
+            succeeded = true;
+            break;
+        }
+    }
+
+    if !succeeded {
+        let _ = std::fs::remove_dir_all(&temp_root);
+        return Err(AppError("生成 PDF 失败：请确认已安装 Chrome 或 Edge".into()));
+    }
+    std::fs::copy(&pdf_path, target_path)
+        .map_err(|err| AppError(format!("保存 PDF 失败：{err}")))?;
+    let _ = std::fs::remove_dir_all(&temp_root);
+    Ok(target_path.to_string())
+}
+
+fn find_browser() -> Option<PathBuf> {
+    let candidates = [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+    ];
+    for path in candidates {
+        let candidate = PathBuf::from(path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        for relative in [
+            r"Google\Chrome\Application\chrome.exe",
+            r"Microsoft\Edge\Application\msedge.exe",
+        ] {
+            let candidate = PathBuf::from(&local_app_data).join(relative);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1998,9 +2131,60 @@ mod tests {
         let render = db
             .render_report("daily", "2026-10-21", "2026-10-21", Some(template.id))
             .unwrap();
-        let html = markdown_to_html(&render);
+        let html = markdown_to_html_content(&render.content);
         assert!(html.contains("&lt;script&gt;"));
         assert!(html.contains("&lt;b&gt;测试"));
         assert!(!html.contains("<script>"));
+    }
+
+    #[test]
+    fn report_html_content_uses_lists_and_print_css() {
+        let html = markdown_to_html_content(
+            "# 标题\n\n- 项目A：60 分钟\n- 项目B：30 分钟\n\n## 下一节\n",
+        );
+        assert!(html.contains("@page{size:A4"));
+        assert!(html.contains("<ul>"));
+        assert!(html.contains("</ul>"));
+        assert!(html.contains("<h1>标题</h1>"));
+        assert!(html.contains("<h2>下一节</h2>"));
+    }
+
+    #[test]
+    fn report_export_uses_provided_content() {
+        let db = db();
+        let target = std::env::temp_dir().join(format!("mars-export-md-{}.md", std::process::id()));
+        let target_str = target.to_str().unwrap();
+        let result = db.export_report(
+            "md",
+            "daily",
+            "2026-10-21",
+            "2026-10-21",
+            None,
+            target_str,
+            Some("润色后的内容".into()),
+        );
+        assert!(result.is_ok());
+        assert_eq!(
+            std::fs::read_to_string(target_str).unwrap(),
+            "润色后的内容"
+        );
+        let _ = std::fs::remove_file(&target);
+    }
+
+    #[test]
+    fn report_pdf_export_uses_local_browser_when_available() {
+        if find_browser().is_none() {
+            return;
+        }
+        let target = std::env::temp_dir().join(format!("mars-smoke-{}.pdf", std::process::id()));
+        let target_str = target.to_str().unwrap();
+        let result = write_pdf(
+            &markdown_to_html_content("# Mars 日报\n\n- 项目A：60 分钟\n"),
+            target_str,
+        );
+        assert!(result.is_ok(), "PDF 导出失败");
+        let bytes = std::fs::read(&target).unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+        let _ = std::fs::remove_file(&target);
     }
 }

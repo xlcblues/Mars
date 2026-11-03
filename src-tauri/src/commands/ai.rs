@@ -148,3 +148,38 @@ pub fn ai_chat_stream(
         .map_err(|error| AppError(error.to_string()))?;
     Ok(response)
 }
+
+#[tauri::command]
+pub fn ai_polish_report_stream(
+    state: State<'_, AppState>,
+    report_type: String,
+    markdown: String,
+    channel: tauri::ipc::Channel<ai::AiStreamEvent>,
+) -> Result<String, AppError> {
+    if markdown.trim().is_empty() {
+        return Err(AppError("没有可润色的报告内容".into()));
+    }
+    let config = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| AppError("数据库锁获取失败".into()))?;
+        ai::get_config(&db)
+            .map_err(AppError)?
+            .ok_or_else(|| AppError("请先在 AI 助手页配置大模型".into()))?
+    };
+    let result = ai::polish_report_stream(&config, &report_type, &markdown, |delta| {
+        channel
+            .send(ai::AiStreamEvent::Delta {
+                text: delta.to_string(),
+            })
+            .map_err(|error| error.to_string())
+    })
+    .map_err(AppError)?;
+    channel
+        .send(ai::AiStreamEvent::Done {
+            actions: Vec::new(),
+        })
+        .map_err(|error| AppError(error.to_string()))?;
+    Ok(result)
+}

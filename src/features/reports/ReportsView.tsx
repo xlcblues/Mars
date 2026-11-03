@@ -8,12 +8,15 @@ import {
   ChevronDown,
   Clock,
   Download,
+  FileText,
   FolderKanban,
   LayoutTemplate,
   Loader2,
   Plus,
   RefreshCw,
+  RotateCcw,
   Save,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -70,7 +73,9 @@ export function ReportsView() {
   const [render, setRender] = useState<ReportRender | null>(null);
   const [loading, setLoading] = useState(true);
   const [rendering, setRendering] = useState(false);
-  const [exporting, setExporting] = useState<"md" | "html" | null>(null);
+  const [exporting, setExporting] = useState<"md" | "html" | "pdf" | null>(null);
+  const [polishedContent, setPolishedContent] = useState<string | null>(null);
+  const [polishing, setPolishing] = useState(false);
   const [note, setNote] = useState("");
   const [designerOpen, setDesignerOpen] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ReportTemplate | null>(null);
@@ -115,6 +120,7 @@ export function ReportsView() {
       try {
         const result = await api.renderReport(nextType, nextStart, nextEnd, templateId);
         setRender(result);
+        setPolishedContent(null);
       } catch (err) {
         setNote(`生成失败：${String(err)}`);
       } finally {
@@ -256,7 +262,34 @@ export function ReportsView() {
     await doRender(reportType, startDate, endDate, activeTemplateId);
   }
 
-  async function exportReport(format: "md" | "html") {
+  async function polishReport() {
+    if (!render) return;
+    try {
+      const config = await api.getAiConfig();
+      if (!config) {
+        setNote("请先在 AI 助手页配置大模型");
+        return;
+      }
+      setPolishing(true);
+      setPolishedContent(null);
+      let accumulated = "";
+      await api.polishReport(reportType, render.content, (event) => {
+        if (event.type === "delta") {
+          accumulated += event.text;
+          setPolishedContent(accumulated);
+        }
+      });
+      setPolishedContent(accumulated);
+      setNote("AI 润色完成");
+    } catch (err) {
+      setPolishedContent(null);
+      setNote(`润色失败：${String(err)}`);
+    } finally {
+      setPolishing(false);
+    }
+  }
+
+  async function exportReport(format: "md" | "html" | "pdf") {
     try {
       const path = await save({
         defaultPath: `mars-${reportType === "weekly" ? "weekly" : "daily"}-${startDate}-${endDate}.${format}`,
@@ -264,7 +297,15 @@ export function ReportsView() {
       });
       if (!path) return;
       setExporting(format);
-      await api.exportReport(format, reportType, startDate, endDate, activeTemplateId, path);
+      await api.exportReport(
+        format,
+        reportType,
+        startDate,
+        endDate,
+        activeTemplateId,
+        path,
+        polishedContent ?? render?.content ?? null,
+      );
       setNote(`已导出 ${fileNameFromPath(path)}`);
     } catch (err) {
       setNote(`导出失败：${String(err)}`);
@@ -298,6 +339,14 @@ export function ReportsView() {
             <Download size={16} strokeWidth={1.9} />
             <span>{exporting === "html" ? "导出中" : "导出 HTML"}</span>
           </button>
+          <button type="button" className="secondary-btn" onClick={() => void exportReport("pdf")} disabled={exporting !== null || !render}>
+            <FileText size={16} strokeWidth={1.9} />
+            <span>{exporting === "pdf" ? "导出中" : "导出 PDF"}</span>
+          </button>
+          <button type="button" className="secondary-btn" onClick={() => void polishReport()} disabled={polishing || exporting !== null || !render}>
+            {polishing ? <Loader2 size={16} strokeWidth={1.9} className="spin" /> : <Sparkles size={16} strokeWidth={1.9} />}
+            <span>{polishing ? "润色中" : "AI 润色"}</span>
+          </button>
           <button type="button" className="primary-btn" onClick={() => void regenerate()} disabled={rendering || !activeTemplateId}>
             {rendering ? <Loader2 size={16} strokeWidth={1.9} className="spin" /> : <RefreshCw size={16} strokeWidth={1.9} />}
             <span>重新生成</span>
@@ -318,11 +367,25 @@ export function ReportsView() {
         <div className="report-range">
           <label>
             <span>开始日期</span>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setPolishedContent(null);
+              }}
+            />
           </label>
           <label>
             <span>结束日期</span>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setPolishedContent(null);
+              }}
+            />
           </label>
           {reportType === "weekly" && (
             <button
@@ -398,15 +461,28 @@ export function ReportsView() {
       <div className="reports-grid">
         <section className="card report-preview">
           <div className="card-head">
-            <h2>预览</h2>
-            <span className="card-count">{rangeLabel}</span>
+            <div className="card-head-titles">
+              <h2>预览</h2>
+              <span className="card-count">{rangeLabel}</span>
+            </div>
+            {polishedContent && (
+              <button
+                type="button"
+                className="text-btn report-restore-btn"
+                onClick={() => setPolishedContent(null)}
+                disabled={polishing}
+              >
+                <RotateCcw size={14} strokeWidth={1.9} />
+                <span>恢复原始</span>
+              </button>
+            )}
           </div>
           {loading ? (
             <p className="empty-inline">加载中…</p>
           ) : !render ? (
             <p className="empty-inline">先创建模板，再生成报告。</p>
           ) : (
-            <pre className="report-markdown">{render.content}</pre>
+            <pre className="report-markdown">{polishedContent ?? render.content}</pre>
           )}
         </section>
 

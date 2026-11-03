@@ -371,6 +371,36 @@ pub fn chat_with_context_stream(
     Ok(AiChatResponse { text, actions })
 }
 
+const REPORT_POLISH_PROMPT: &str = r##"你是 Mars 工作记录应用的专业报告润色助手。你会收到一份由模板生成的日报或周报 Markdown 草稿，请将其润色成专业、简洁、可直接分享的中文工作汇报。
+
+润色要求：
+- 保留原文所有事实、数字、项目名称、日期与工作内容，严禁新增、删除或编造内容。
+- 保留原有 Markdown 标题层级与整体结构，不改变章节含义。
+- 优化语句衔接与书面表达，去掉口语化、重复与冗余空话。
+- 保持占位内容（如“（待补充）”）原样。
+- 直接输出完整 Markdown 文档，不要输出 JSON、解释或任何额外说明。"##;
+
+pub fn polish_report_stream(
+    config: &AiConfig,
+    report_type: &str,
+    markdown: &str,
+    mut on_delta: impl FnMut(&str) -> Result<(), String>,
+) -> Result<String, String> {
+    let kind_label = if report_type == "weekly" { "周报" } else { "日报" };
+    let system = format!("你正在润色一份{kind_label}。\n{REPORT_POLISH_PROMPT}");
+    let messages = vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: system,
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: format!("请润色以下{kind_label}草稿，直接输出润色结果：\n\n{markdown}"),
+        },
+    ];
+    chat_content_stream(config, &messages, &mut on_delta)
+}
+
 fn validate_entry(entry: &WorkEntryInput) -> Result<(), String> {
     if entry.work_date.trim().is_empty() {
         return Err("记录日期不能为空".to_string());

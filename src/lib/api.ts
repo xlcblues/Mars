@@ -347,12 +347,13 @@ export const api = {
       templateId,
     }),
   exportReport: (
-    format: "md" | "html",
+    format: "md" | "html" | "pdf",
     reportType: string,
     startDate: string,
     endDate: string,
     templateId: number | null,
     targetPath: string,
+    content: string | null,
   ) =>
     invoke<string>("export_report", {
       format,
@@ -361,6 +362,7 @@ export const api = {
       endDate,
       templateId,
       targetPath,
+      content,
     }),
 
   localDataInfo: () => invoke<LocalDataInfo>("local_data_info"),
@@ -388,6 +390,15 @@ export const api = {
     const channel = new Channel<AiStreamEvent>();
     channel.onmessage = onEvent;
     return invoke<AiChatResponse>("ai_chat_stream", { prompt, history, channel });
+  },
+  polishReport: (
+    reportType: string,
+    markdown: string,
+    onEvent: (event: AiStreamEvent) => void,
+  ) => {
+    const channel = new Channel<AiStreamEvent>();
+    channel.onmessage = onEvent;
+    return invoke<string>("ai_polish_report_stream", { reportType, markdown, channel });
   },
 };
 

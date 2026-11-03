@@ -66,6 +66,7 @@ pub fn export_report(
     end_date: String,
     template_id: Option<i64>,
     target_path: String,
+    content: Option<String>,
 ) -> Result<String, AppError> {
     state
         .db
@@ -78,5 +79,6 @@ pub fn export_report(
             &end_date,
             template_id,
             &target_path,
+            content,
         )
 }

@@ -53,6 +53,7 @@ pub fn run() {
             ai::list_ai_tool_logs,
             ai::ai_apply_actions,
             ai::ai_chat_stream,
+            ai::ai_polish_report_stream,
             projects::list_projects,
             projects::create_project,
             projects::update_project,
