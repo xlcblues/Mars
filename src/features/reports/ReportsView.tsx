@@ -26,6 +26,7 @@ import type {
   ReportTemplateInput,
   TemplateBlock,
 } from "../../lib/api";
+import { MarkdownView } from "../../components/MarkdownView";
 import {
   api,
   currentWeekRange,
@@ -482,7 +483,7 @@ export function ReportsView() {
           ) : !render ? (
             <p className="empty-inline">先创建模板，再生成报告。</p>
           ) : (
-            <pre className="report-markdown">{polishedContent ?? render.content}</pre>
+            <MarkdownView content={polishedContent ?? render.content} />
           )}
         </section>
 

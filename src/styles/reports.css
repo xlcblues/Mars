@@ -340,19 +340,136 @@
   flex: 1 1 auto;
   min-height: 0;
   margin: 0;
-  padding: 20px 22px 24px;
+  padding: 26px 30px 32px;
   max-height: 560px;
   overflow: auto;
   scrollbar-gutter: stable;
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.75;
   color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--bg-raised) 72%, transparent);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+.report-markdown h1 {
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-strong);
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.report-markdown h2 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 24px 0 10px;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.report-markdown h2::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 15px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.report-markdown h3 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.report-markdown p {
+  margin: 0 0 10px;
+}
+
+.report-markdown ul,
+.report-markdown ol {
+  margin: 8px 0 16px;
+  padding-left: 24px;
+}
+
+.report-markdown li {
+  margin: 5px 0;
+  padding-left: 2px;
+}
+
+.report-markdown li::marker {
+  color: var(--accent);
+}
+
+.report-markdown code {
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-subtle) 72%, transparent);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+  font-size: 0.92em;
+  color: var(--accent-ink);
+}
+
+.report-markdown pre {
+  margin: 10px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-subtle) 80%, transparent);
+  overflow-x: auto;
+}
+
+.report-markdown pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.report-markdown blockquote {
+  margin: 12px 0 16px;
+  padding: 2px 0 2px 14px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--text-secondary);
+}
+
+.report-markdown blockquote p {
+  margin: 4px 0;
+}
+
+.report-markdown hr {
+  height: 1px;
+  margin: 18px 0;
+  border: 0;
+  background: var(--line);
+}
+
+.report-markdown a {
+  color: var(--accent-ink);
+  text-decoration: none;
+}
+
+.report-markdown a:hover {
+  text-decoration: underline;
+}
+
+.report-markdown strong {
+  color: var(--text);
+  font-weight: 650;
 }
 
 .report-markdown::-webkit-scrollbar {
