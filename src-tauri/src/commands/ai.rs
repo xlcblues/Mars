@@ -28,15 +28,20 @@ pub fn save_ai_config(
 }
 
 #[tauri::command]
-pub fn test_ai_connection(state: State<'_, AppState>) -> Result<String, AppError> {
-    let db = state
-        .db
-        .lock()
-        .map_err(|_| AppError("数据库锁获取失败".into()))?;
-    let config = ai::get_config(&db)
-        .map_err(AppError)?
-        .ok_or_else(|| AppError("请先保存 AI 配置".into()))?;
-    ai::test_connection(&config).map_err(AppError)
+pub async fn test_ai_connection(state: State<'_, AppState>) -> Result<String, AppError> {
+    let config = {
+        let db = state
+            .db
+            .lock()
+            .map_err(|_| AppError("数据库锁获取失败".into()))?;
+        ai::get_config(&db)
+            .map_err(AppError)?
+            .ok_or_else(|| AppError("请先保存 AI 配置".into()))?
+    };
+    tauri::async_runtime::spawn_blocking(move || ai::test_connection(&config))
+        .await
+        .map_err(|error| AppError(error.to_string()))?
+        .map_err(AppError)
 }
 
 #[tauri::command]
@@ -112,13 +117,13 @@ pub fn ai_apply_actions(
 }
 
 #[tauri::command]
-pub fn ai_chat_stream(
+pub async fn ai_chat_stream(
     state: State<'_, AppState>,
     prompt: String,
     history: Vec<ai::ChatMessage>,
     channel: tauri::ipc::Channel<ai::AiStreamEvent>,
 ) -> Result<ai::AiChatResponse, AppError> {
-    let trimmed = prompt.trim();
+    let trimmed = prompt.trim().to_string();
     if trimmed.is_empty() {
         return Err(AppError("请输入消息".into()));
     }
@@ -133,13 +138,18 @@ pub fn ai_chat_stream(
         let context = ai::build_context(&db).map_err(AppError)?;
         (config, context)
     };
-    let response = ai::chat_with_context_stream(&config, &context, trimmed, &history, |delta| {
-        channel
-            .send(ai::AiStreamEvent::Delta {
-                text: delta.to_string(),
-            })
-            .map_err(|error| error.to_string())
+    let stream_channel = channel.clone();
+    let response = tauri::async_runtime::spawn_blocking(move || {
+        ai::chat_with_context_stream(&config, &context, &trimmed, &history, |delta| {
+            stream_channel
+                .send(ai::AiStreamEvent::Delta {
+                    text: delta.to_string(),
+                })
+                .map_err(|error| error.to_string())
+        })
     })
+    .await
+    .map_err(|error| AppError(error.to_string()))?
     .map_err(AppError)?;
     channel
         .send(ai::AiStreamEvent::Done {
@@ -150,7 +160,7 @@ pub fn ai_chat_stream(
 }
 
 #[tauri::command]
-pub fn ai_polish_report_stream(
+pub async fn ai_polish_report_stream(
     state: State<'_, AppState>,
     report_type: String,
     markdown: String,
@@ -168,13 +178,18 @@ pub fn ai_polish_report_stream(
             .map_err(AppError)?
             .ok_or_else(|| AppError("请先在 AI 助手页配置大模型".into()))?
     };
-    let result = ai::polish_report_stream(&config, &report_type, &markdown, |delta| {
-        channel
-            .send(ai::AiStreamEvent::Delta {
-                text: delta.to_string(),
-            })
-            .map_err(|error| error.to_string())
+    let stream_channel = channel.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ai::polish_report_stream(&config, &report_type, &markdown, |delta| {
+            stream_channel
+                .send(ai::AiStreamEvent::Delta {
+                    text: delta.to_string(),
+                })
+                .map_err(|error| error.to_string())
+        })
     })
+    .await
+    .map_err(|error| AppError(error.to_string()))?
     .map_err(AppError)?;
     channel
         .send(ai::AiStreamEvent::Done {

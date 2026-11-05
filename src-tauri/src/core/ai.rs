@@ -106,6 +106,7 @@ pub fn chat_content_stream(
         "messages": messages,
         "temperature": 0.3,
         "stream": true,
+        "enable_thinking": false,
     });
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(30))
