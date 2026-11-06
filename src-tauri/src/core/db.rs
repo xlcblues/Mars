@@ -901,15 +901,7 @@ impl Database {
             params![today],
             |row| row.get(0),
         )?;
-        let today_minutes: i64 = self.conn.query_row(
-            "SELECT COALESCE(SUM(
-               CASE WHEN started_at IS NOT NULL AND ended_at IS NOT NULL
-                 THEN (strftime('%s', ended_at) - strftime('%s', started_at)) / 60
-                 ELSE 0 END), 0)
-             FROM work_entries WHERE work_date = ?1",
-            params![today],
-            |row| row.get(0),
-        )?;
+        let today_minutes: i64 = self.merged_minutes(today, today, None, None)?;
         let week_entries: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM work_entries WHERE work_date >= ?1 AND work_date <= ?2",
             params![week_start, today],
@@ -941,20 +933,20 @@ impl Database {
     }
 
     pub fn week_trend(&self, start: &NaiveDate) -> Result<Vec<WeekTrendPoint>, AppError> {
+        let end = *start + Duration::days(6);
+        let merged = self.merged_minutes_by_date(
+            &start.format("%Y-%m-%d").to_string(),
+            &end.format("%Y-%m-%d").to_string(),
+            None,
+            None,
+        )?;
         let mut points = Vec::new();
         for offset in 0..7 {
             let day = *start + Duration::days(offset);
-            let minutes: i64 = self.conn.query_row(
-                "SELECT COALESCE(SUM(
-                   CASE WHEN started_at IS NOT NULL AND ended_at IS NOT NULL
-                     THEN (strftime('%s', ended_at) - strftime('%s', started_at)) / 60
-                     ELSE 0 END), 0)
-                 FROM work_entries WHERE work_date = ?1",
-                params![day.format("%Y-%m-%d").to_string()],
-                |row| row.get(0),
-            )?;
+            let key = day.format("%Y-%m-%d").to_string();
+            let minutes = merged.get(&key).copied().unwrap_or(0);
             points.push(WeekTrendPoint {
-                date: day.format("%Y-%m-%d").to_string(),
+                date: key,
                 minutes,
             });
         }
@@ -963,33 +955,48 @@ impl Database {
 
     pub fn project_overview(&self, today: &str, week_start: &str) -> Result<Vec<ProjectOverview>, AppError> {
         let mut stmt = self.conn.prepare(
-            "SELECT p.id, p.name, p.color,
-               COALESCE(SUM(CASE WHEN e.work_date = ?1 AND e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
-                 THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0),
-               COALESCE(SUM(CASE WHEN e.work_date >= ?2 AND e.work_date <= ?1 AND e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
-                 THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0)
-             FROM projects p
-             LEFT JOIN work_entries e ON e.project_id = p.id
-             WHERE p.status = 'active'
-             GROUP BY p.id, p.name, p.color
-             ORDER BY SUM(CASE WHEN e.work_date >= ?2 AND e.work_date <= ?1 AND e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
-               THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END) DESC
-        ",
+            "SELECT id, name, color
+             FROM projects
+             WHERE status = 'active'
+             ORDER BY name",
         )?;
-        let rows = stmt.query_map(params![today, week_start], |row| {
-            Ok(ProjectOverview {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                color: row.get(2)?,
-                today_minutes: row.get(3)?,
-                week_minutes: row.get(4)?,
-                progress: (row.get::<_, i64>(4)? * 100) / WEEK_TARGET_MINUTES,
-            })
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
         })?;
-        let mut projects = Vec::new();
+        let mut meta = Vec::new();
         for row in rows {
-            projects.push(row?);
+            meta.push(row?);
         }
+
+        let merged = self.merged_minutes_by_project_date(week_start, today, None, None)?;
+        let mut projects = Vec::new();
+        for (id, name, color) in meta {
+            let today_minutes: i64 = merged
+                .iter()
+                .filter(|((date, project), _)| project == &id && date.as_str() == today)
+                .map(|(_, minutes)| minutes)
+                .sum();
+            let week_minutes: i64 = merged
+                .iter()
+                .filter(|((date, project), _)| {
+                    project == &id && date.as_str() >= week_start && date.as_str() <= today
+                })
+                .map(|(_, minutes)| minutes)
+                .sum();
+            projects.push(ProjectOverview {
+                id,
+                name,
+                color,
+                today_minutes,
+                week_minutes,
+                progress: (week_minutes * 100) / WEEK_TARGET_MINUTES,
+            });
+        }
+        projects.sort_by(|a, b| b.week_minutes.cmp(&a.week_minutes));
         Ok(projects)
     }
 
@@ -1015,6 +1022,188 @@ impl Database {
         (format!(" WHERE {}", conditions.join(" AND ")), values)
     }
 
+    fn merged_minutes(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> Result<i64, AppError> {
+        let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
+        let sql = format!(
+            "WITH timed AS (
+               SELECT e.work_date,
+                      (substr(e.started_at, 1, 2) * 60 + substr(e.started_at, 4, 2)) AS start_min,
+                      (substr(e.ended_at, 1, 2) * 60 + substr(e.ended_at, 4, 2)) AS end_min
+                 FROM work_entries e
+                 {where_clause}
+                  AND e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+             ),
+             gaps AS (
+               SELECT work_date, start_min, end_min,
+                      MAX(end_min) OVER (
+                        PARTITION BY work_date
+                        ORDER BY start_min, end_min
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                      ) AS prev_max_end
+                 FROM timed
+             ),
+             intervals AS (
+               SELECT work_date, start_min, end_min,
+                      SUM(CASE
+                        WHEN prev_max_end IS NULL OR start_min > prev_max_end THEN 1
+                        ELSE 0
+                      END) OVER (
+                        PARTITION BY work_date
+                        ORDER BY start_min, end_min
+                      ) AS interval_no
+                 FROM gaps
+             ),
+             merged AS (
+               SELECT work_date,
+                      MIN(start_min) AS start_min,
+                      MAX(end_min) AS end_min,
+                      interval_no
+                 FROM intervals
+                GROUP BY work_date, interval_no
+             )
+             SELECT COALESCE(SUM(end_min - start_min), 0)
+               FROM merged",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        stmt.query_row(rusqlite::params_from_iter(values.iter()), |row| row.get(0))
+            .map_err(Into::into)
+    }
+
+    fn merged_minutes_by_date(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> Result<std::collections::HashMap<String, i64>, AppError> {
+        let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
+        let sql = format!(
+            "WITH timed AS (
+               SELECT e.work_date,
+                      (substr(e.started_at, 1, 2) * 60 + substr(e.started_at, 4, 2)) AS start_min,
+                      (substr(e.ended_at, 1, 2) * 60 + substr(e.ended_at, 4, 2)) AS end_min
+                 FROM work_entries e
+                 {where_clause}
+                  AND e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+             ),
+             gaps AS (
+               SELECT work_date, start_min, end_min,
+                      MAX(end_min) OVER (
+                        PARTITION BY work_date
+                        ORDER BY start_min, end_min
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                      ) AS prev_max_end
+                 FROM timed
+             ),
+             intervals AS (
+               SELECT work_date, start_min, end_min,
+                      SUM(CASE
+                        WHEN prev_max_end IS NULL OR start_min > prev_max_end THEN 1
+                        ELSE 0
+                      END) OVER (
+                        PARTITION BY work_date
+                        ORDER BY start_min, end_min
+                      ) AS interval_no
+                 FROM gaps
+             ),
+             merged AS (
+               SELECT work_date,
+                      MIN(start_min) AS start_min,
+                      MAX(end_min) AS end_min,
+                      interval_no
+                 FROM intervals
+                GROUP BY work_date, interval_no
+             )
+             SELECT work_date, SUM(end_min - start_min) AS minutes
+               FROM merged
+              GROUP BY work_date
+              ORDER BY work_date",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut by_date = std::collections::HashMap::new();
+        for row in rows {
+            let (date, minutes) = row?;
+            *by_date.entry(date).or_insert(0) += minutes;
+        }
+        Ok(by_date)
+    }
+
+    fn merged_minutes_by_project_date(
+        &self,
+        start_date: &str,
+        end_date: &str,
+        project_id: Option<i64>,
+        tag: Option<&str>,
+    ) -> Result<std::collections::HashMap<(String, i64), i64>, AppError> {
+        let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
+        let sql = format!(
+            "WITH timed AS (
+               SELECT e.work_date, e.project_id,
+                      (substr(e.started_at, 1, 2) * 60 + substr(e.started_at, 4, 2)) AS start_min,
+                      (substr(e.ended_at, 1, 2) * 60 + substr(e.ended_at, 4, 2)) AS end_min
+                 FROM work_entries e
+                 {where_clause}
+                  AND e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
+                  AND e.project_id IS NOT NULL
+             ),
+             gaps AS (
+               SELECT work_date, project_id, start_min, end_min,
+                      MAX(end_min) OVER (
+                        PARTITION BY work_date, project_id
+                        ORDER BY start_min, end_min
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                      ) AS prev_max_end
+                 FROM timed
+             ),
+             intervals AS (
+               SELECT work_date, project_id, start_min, end_min,
+                      SUM(CASE
+                        WHEN prev_max_end IS NULL OR start_min > prev_max_end THEN 1
+                        ELSE 0
+                      END) OVER (
+                        PARTITION BY work_date, project_id
+                        ORDER BY start_min, end_min
+                      ) AS interval_no
+                 FROM gaps
+             ),
+             merged AS (
+               SELECT work_date, project_id,
+                      MIN(start_min) AS start_min,
+                      MAX(end_min) AS end_min,
+                      interval_no
+                 FROM intervals
+                GROUP BY work_date, project_id, interval_no
+             )
+             SELECT work_date, project_id, SUM(end_min - start_min) AS minutes
+               FROM merged
+              GROUP BY work_date, project_id
+              ORDER BY work_date",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        let mut by_project_date = std::collections::HashMap::new();
+        for row in rows {
+            let (date, project, minutes) = row?;
+            *by_project_date.entry((date, project)).or_insert(0) += minutes;
+        }
+        Ok(by_project_date)
+    }
+
     pub fn analytics_summary(
         &self,
         start_date: &str,
@@ -1024,21 +1213,20 @@ impl Database {
     ) -> Result<AnalyticsSummary, AppError> {
         let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
         let sql = format!(
-            "SELECT COALESCE(SUM(CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
-               THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0),
-               COUNT(*), COUNT(DISTINCT e.work_date)
+            "SELECT COUNT(*), COUNT(DISTINCT e.work_date)
              FROM work_entries e{where_clause}"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let row = stmt.query_row(rusqlite::params_from_iter(values.iter()), |row| {
             Ok(AnalyticsSummary {
-                total_minutes: row.get(0)?,
-                entry_count: row.get(1)?,
-                active_days: row.get(2)?,
+                total_minutes: 0,
+                entry_count: row.get(0)?,
+                active_days: row.get(1)?,
                 avg_minutes: 0.0,
             })
         })?;
         let mut summary = row;
+        summary.total_minutes = self.merged_minutes(start_date, end_date, project_id, tag)?;
         summary.avg_minutes = if summary.active_days > 0 {
             summary.total_minutes as f64 / summary.active_days as f64
         } else {
@@ -1056,10 +1244,7 @@ impl Database {
     ) -> Result<Vec<DayStatPoint>, AppError> {
         let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
         let sql = format!(
-            "SELECT e.work_date,
-               COALESCE(SUM(CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
-                 THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0),
-               COUNT(*)
+            "SELECT e.work_date, COUNT(*)
              FROM work_entries e{where_clause}
              GROUP BY e.work_date
              ORDER BY e.work_date"
@@ -1068,14 +1253,20 @@ impl Database {
         let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
             Ok(DayStatPoint {
                 date: row.get(0)?,
-                minutes: row.get(1)?,
-                entries: row.get(2)?,
+                minutes: 0,
+                entries: row.get(1)?,
             })
         })?;
         let mut by_date = std::collections::HashMap::new();
         for row in rows {
             let point = row?;
             by_date.insert(point.date.clone(), point);
+        }
+        let merged_by_date = self.merged_minutes_by_date(start_date, end_date, project_id, tag)?;
+        for (date, minutes) in merged_by_date {
+            if let Some(point) = by_date.get_mut(&date) {
+                point.minutes = minutes;
+            }
         }
         let start = NaiveDate::parse_from_str(start_date, "%Y-%m-%d").map_err(|err| AppError(err.to_string()))?;
         let end = NaiveDate::parse_from_str(end_date, "%Y-%m-%d").map_err(|err| AppError(err.to_string()))?;
@@ -1102,28 +1293,41 @@ impl Database {
     ) -> Result<Vec<ProjectShare>, AppError> {
         let (where_clause, values) = Self::analytics_conditions(start_date, end_date, project_id, tag);
         let sql = format!(
-            "SELECT p.id, p.name, p.color,
-               COALESCE(SUM(CASE WHEN e.started_at IS NOT NULL AND e.ended_at IS NOT NULL
-                 THEN (strftime('%s', e.ended_at) - strftime('%s', e.started_at)) / 60 ELSE 0 END), 0)
+            "SELECT p.id, p.name, p.color
              FROM projects p
              JOIN work_entries e ON e.project_id = p.id{where_clause}
              GROUP BY p.id, p.name, p.color
-             ORDER BY 3 DESC"
+             ORDER BY p.name"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
-            Ok(ProjectShare {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                color: row.get(2)?,
-                minutes: row.get(3)?,
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut meta = Vec::new();
+        for row in rows {
+            meta.push(row?);
+        }
+
+        let merged = self.merged_minutes_by_project_date(start_date, end_date, project_id, tag)?;
+        let mut minutes_by_project = std::collections::HashMap::new();
+        for ((_, project), minutes) in &merged {
+            *minutes_by_project.entry(*project).or_insert(0) += minutes;
+        }
+        let mut shares: Vec<ProjectShare> = meta
+            .into_iter()
+            .map(|(id, name, color)| ProjectShare {
+                id,
+                name,
+                color,
+                minutes: minutes_by_project.get(&id).copied().unwrap_or(0),
                 percent: 0,
             })
-        })?;
-        let mut shares = Vec::new();
-        for row in rows {
-            shares.push(row?);
-        }
+            .collect();
+        shares.sort_by(|a, b| b.minutes.cmp(&a.minutes));
         let total: i64 = shares.iter().map(|share| share.minutes).sum();
         if total > 0 {
             for share in &mut shares {
@@ -1297,7 +1501,8 @@ impl Database {
             days.push(row?);
         }
 
-        let total_minutes: i64 = days.iter().map(|d| d.minutes).sum();
+        let merged_by_date = self.merged_minutes_by_date(start_date, end_date, None, None)?;
+        let total_minutes: i64 = merged_by_date.values().sum();
         let active_days = {
             let mut set = std::collections::HashSet::new();
             for d in &days {
@@ -1313,21 +1518,41 @@ impl Database {
             active_days,
         };
 
-        let mut projects: Vec<ReportProjectItem> = Vec::new();
+        let mut entry_counts: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
         for d in &days {
             if let Some(name) = &d.project_name {
-                if let Some(p) = projects.iter_mut().find(|p| &p.name == name) {
-                    p.minutes += d.minutes;
-                    p.entry_count += 1;
-                } else {
-                    projects.push(ReportProjectItem {
-                        name: name.clone(),
-                        minutes: d.minutes,
-                        entry_count: 1,
-                    });
-                }
+                *entry_counts.entry(name.clone()).or_insert(0) += 1;
             }
         }
+        let mut project_names = std::collections::HashMap::new();
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT p.id, p.name
+             FROM work_entries e
+             JOIN projects p ON p.id = e.project_id
+             WHERE e.work_date BETWEEN ?1 AND ?2",
+        )?;
+        let rows = stmt.query_map(params![start_date, end_date], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (id, name) = row?;
+            project_names.insert(id, name);
+        }
+        let merged_by_project_date = self.merged_minutes_by_project_date(start_date, end_date, None, None)?;
+        let mut merged_by_name: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for ((_, project), minutes) in &merged_by_project_date {
+            if let Some(name) = project_names.get(project) {
+                *merged_by_name.entry(name.clone()).or_insert(0) += minutes;
+            }
+        }
+        let mut projects: Vec<ReportProjectItem> = entry_counts
+            .into_iter()
+            .map(|(name, entry_count)| ReportProjectItem {
+                minutes: merged_by_name.get(&name).copied().unwrap_or(0),
+                name,
+                entry_count,
+            })
+            .collect();
         projects.sort_by(|a, b| b.minutes.cmp(&a.minutes));
 
         let mut notices = Vec::new();
@@ -1929,6 +2154,91 @@ mod tests {
         let json = analytics_json(&summary, &daily, &share);
         assert!(json.contains("\"daily\""));
         assert!(json.contains("\"projects\""));
+    }
+
+    #[test]
+    fn overlapping_entries_are_counted_once() {
+        let db = db();
+        let project = db.create_project("Mars 桌面端", Some("#C3451F")).unwrap();
+
+        for _ in 0..2 {
+            db.save_entry(&WorkEntryInput {
+                id: None,
+                project_id: Some(project.id),
+                work_date: "2026-11-05".into(),
+                started_at: Some("08:00".into()),
+                ended_at: Some("09:00".into()),
+                title: "完全重复时段".into(),
+                content: None,
+                tags: Some("开发".into()),
+            })
+            .unwrap();
+        }
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project.id),
+            work_date: "2026-11-06".into(),
+            started_at: Some("08:00".into()),
+            ended_at: Some("09:00".into()),
+            title: "时段一".into(),
+            content: None,
+            tags: Some("开发".into()),
+        })
+        .unwrap();
+        db.save_entry(&WorkEntryInput {
+            id: None,
+            project_id: Some(project.id),
+            work_date: "2026-11-06".into(),
+            started_at: Some("08:30".into()),
+            ended_at: Some("10:00".into()),
+            title: "重叠时段".into(),
+            content: None,
+            tags: Some("开发".into()),
+        })
+        .unwrap();
+
+        let daily = db.daily_trend("2026-11-05", "2026-11-06", None, None).unwrap();
+        assert_eq!(daily.len(), 2);
+        assert_eq!(daily[0].minutes, 60);
+        assert_eq!(daily[0].entries, 2);
+        assert_eq!(daily[1].minutes, 120);
+        assert_eq!(daily[1].entries, 2);
+
+        let analytics = db
+            .analytics_summary("2026-11-05", "2026-11-06", None, None)
+            .unwrap();
+        assert_eq!(analytics.total_minutes, 180);
+        assert_eq!(analytics.entry_count, 4);
+        assert_eq!(analytics.active_days, 2);
+
+        let summary = db.dashboard_summary("2026-11-06", "2026-11-02").unwrap();
+        assert_eq!(summary.today_entries, 2);
+        assert_eq!(summary.today_minutes, 120);
+        assert_eq!(summary.week_entries, 4);
+
+        let start = NaiveDate::parse_from_str("2026-11-02", "%Y-%m-%d").unwrap();
+        let trend = db.week_trend(&start).unwrap();
+        assert_eq!(trend[3].minutes, 60);
+        assert_eq!(trend[4].minutes, 120);
+
+        let overview = db.project_overview("2026-11-06", "2026-11-02").unwrap();
+        let target = overview.iter().find(|p| p.id == project.id).unwrap();
+        assert_eq!(target.today_minutes, 120);
+        assert_eq!(target.week_minutes, 180);
+
+        let share = db.project_share("2026-11-05", "2026-11-06", None, None).unwrap();
+        assert_eq!(share.len(), 1);
+        assert_eq!(share[0].minutes, 180);
+        assert_eq!(share[0].percent, 100);
+
+        let render = db
+            .render_report("daily", "2026-11-06", "2026-11-06", None)
+            .unwrap();
+        assert_eq!(render.stats.total_minutes, 120);
+        assert_eq!(render.stats.entry_count, 2);
+        assert_eq!(render.projects.len(), 1);
+        assert_eq!(render.projects[0].minutes, 120);
+        assert_eq!(render.projects[0].entry_count, 2);
     }
 
     #[test]
