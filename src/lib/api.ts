@@ -190,11 +190,36 @@ export interface AiActionArchiveProject {
   id: number;
 }
 
+export interface AiActionQueryEntries {
+  type: "queryEntries";
+  keyword?: string | null;
+  projectId?: number | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  tag?: string | null;
+  limit?: number | null;
+}
+
+export interface AiActionUpdateProject {
+  type: "updateProject";
+  id: number;
+  name?: string | null;
+  color?: string | null;
+}
+
+export interface AiActionRestoreProject {
+  type: "restoreProject";
+  id: number;
+}
+
 export type AiAction =
   | AiActionSaveEntry
   | AiActionDeleteEntry
   | AiActionCreateProject
-  | AiActionArchiveProject;
+  | AiActionArchiveProject
+  | AiActionQueryEntries
+  | AiActionUpdateProject
+  | AiActionRestoreProject;
 
 export interface AiChatResponse {
   text: string;
@@ -204,6 +229,12 @@ export interface AiChatResponse {
 export interface AiApplyResult {
   applied: number;
   message: string;
+  results: AiActionResult[];
+}
+
+export interface AiActionResult {
+  action: string;
+  data: unknown;
 }
 
 export interface AiStreamEventDelta {

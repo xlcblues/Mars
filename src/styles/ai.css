@@ -746,6 +746,86 @@
 .ai-action-note.error {
   color: var(--danger);
 }
+.ai-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ai-result-card {
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  padding: 10px 12px;
+  box-shadow: var(--shadow-1);
+}
+.ai-result-table {
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.ai-result-row {
+  display: grid;
+  grid-template-columns: 88px 96px minmax(0, 1fr) 58px 76px;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--line);
+}
+.ai-result-row:last-child {
+  border-bottom: none;
+}
+.ai-result-row.head {
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.ai-result-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-result-row .ai-result-main {
+  color: var(--text);
+}
+.ai-result-empty {
+  margin-top: 8px;
+  padding: 4px 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text-tertiary);
+}
+.ai-result-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+.ai-result-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ai-result-field span {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--text-tertiary);
+}
+.ai-result-field strong {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ai-empty {
   display: flex;
   flex-direction: column;

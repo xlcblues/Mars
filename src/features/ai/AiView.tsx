@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 import {
   ArrowUpRight,
   Check,
+  Database,
   Loader2,
   MessageSquare,
   Plus,
+  Search,
   Send,
   Settings,
   Sparkles,
@@ -14,12 +16,14 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import { api } from "../../lib/api";
+import { api, formatMinutes } from "../../lib/api";
 import type {
   AiAction,
+  AiActionResult,
   AiChatMessage,
   AiConfig,
   AiSessionMeta,
+  WorkEntry,
 } from "../../lib/api";
 
 const SUGGESTIONS = [
@@ -163,10 +167,13 @@ function renderMarkdown(text: string): ReactNode[] {
 
 function actionLabel(action: AiAction): string {
   switch (action.type) {
-    case "saveEntry": return "保存记录";
+    case "saveEntry": return action.entry.id ? "更新记录" : "保存记录";
     case "deleteEntry": return "删除记录";
     case "createProject": return "创建项目";
     case "archiveProject": return "归档项目";
+    case "queryEntries": return "查询记录";
+    case "updateProject": return "更新项目";
+    case "restoreProject": return "恢复项目";
     default: return "执行操作";
   }
 }
@@ -176,13 +183,115 @@ function actionDetail(action: AiAction): string {
     case "saveEntry": {
       const start = action.entry.startedAt ? ` ${action.entry.startedAt} 开始` : "";
       const end = action.entry.endedAt ? ` ${action.entry.endedAt} 结束` : "";
-      return `${action.entry.title} · ${action.entry.workDate}${start}${end}`;
+      const prefix = action.entry.id ? `记录 #${action.entry.id} · ` : "";
+      return `${prefix}${action.entry.title} · ${action.entry.workDate}${start}${end}`;
     }
     case "deleteEntry": return `删除记录 #${action.id}`;
     case "createProject": return `新建项目 "${action.name}"`;
     case "archiveProject": return `归档项目 #${action.id}`;
+    case "queryEntries": {
+      const parts = [
+        action.keyword ? `关键字 "${action.keyword}"` : "",
+        action.projectId ? `项目 #${action.projectId}` : "",
+        action.startDate && action.endDate
+          ? `${action.startDate} 至 ${action.endDate}`
+          : action.startDate || action.endDate,
+        action.tag ? `标签 ${action.tag}` : "",
+        action.limit ? `最多 ${action.limit} 条` : "最多 20 条",
+      ].filter(Boolean);
+      return `查询工作记录：${parts.join(" · ")}`;
+    }
+    case "updateProject": {
+      const parts = [
+        action.name ? `名称 "${action.name}"` : "",
+        action.color ? `颜色 ${action.color}` : "",
+      ].filter(Boolean);
+      return `更新项目 #${action.id}${parts.length > 0 ? `：${parts.join(" · ")}` : ""}`;
+    }
+    case "restoreProject": return `恢复项目 #${action.id}`;
     default: return "";
   }
+}
+
+function resultLabel(action: string): string {
+  switch (action) {
+    case "queryEntries": return "查询结果";
+    case "saveEntry": return "保存记录";
+    case "createProject": return "创建项目";
+    case "updateProject": return "更新项目";
+    case "restoreProject": return "恢复项目";
+    default: return "操作结果";
+  }
+}
+
+function fieldLabel(key: string): string {
+  switch (key) {
+    case "id": return "ID";
+    case "name": return "名称";
+    case "title": return "标题";
+    case "workDate": return "日期";
+    case "projectName": return "项目";
+    case "color": return "颜色";
+    case "status": return "状态";
+    case "durationMinutes": return "时长";
+    case "tags": return "标签";
+    default: return key;
+  }
+}
+
+function formatField(key: string, value: unknown): string {
+  if (key === "durationMinutes" && typeof value === "number") {
+    return formatMinutes(value);
+  }
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function AiResultBody({ result }: { result: AiActionResult }) {
+  if (result.action === "queryEntries" && Array.isArray(result.data)) {
+    const entries = result.data as WorkEntry[];
+    if (entries.length === 0) {
+      return <div className="ai-result-empty">没有找到符合条件的记录</div>;
+    }
+    return (
+      <div className="ai-result-table">
+        <div className="ai-result-row head">
+          <span>日期</span>
+          <span>项目</span>
+          <span>内容</span>
+          <span>时长</span>
+          <span>标签</span>
+        </div>
+        {entries.map((entry) => (
+          <div className="ai-result-row" key={entry.id}>
+            <span>{entry.workDate}</span>
+            <span>{entry.projectName ?? "未分配"}</span>
+            <span className="ai-result-main">{entry.title}</span>
+            <span>{entry.durationMinutes > 0 ? formatMinutes(entry.durationMinutes) : "—"}</span>
+            <span>{entry.tags ?? "—"}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (result.data && typeof result.data === "object" && !Array.isArray(result.data)) {
+    const record = result.data as Record<string, unknown>;
+    const fields = Object.entries(record).filter(([key]) =>
+      ["id", "name", "title", "workDate", "projectName", "color", "status", "durationMinutes", "tags"].includes(key),
+    );
+    return (
+      <div className="ai-result-fields">
+        {fields.map(([key, value]) => (
+          <div className="ai-result-field" key={key}>
+            <span>{fieldLabel(key)}</span>
+            <strong>{formatField(key, value)}</strong>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <div className="ai-result-empty">{JSON.stringify(result.data)}</div>;
 }
 
 function AiView() {
@@ -203,6 +312,7 @@ function AiView() {
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
   const [pendingActions, setPendingActions] = useState<AiAction[]>([]);
+  const [actionResults, setActionResults] = useState<AiActionResult[]>([]);
   const [applying, setApplying] = useState(false);
   const [applyNotice, setApplyNotice] = useState<ApplyNotice | null>(null);
   const [error, setError] = useState("");
@@ -235,6 +345,7 @@ function AiView() {
     setActiveSessionId(null);
     setMessages([]);
     setPendingActions([]);
+    setActionResults([]);
     setStreamText("");
     setError("");
     setApplyNotice(null);
@@ -247,6 +358,7 @@ function AiView() {
       setActiveSessionId(id);
       setMessages(parseMessages(session.messagesJson));
       setPendingActions([]);
+      setActionResults([]);
       setStreamText("");
       setError("");
       setApplyNotice(null);
@@ -284,6 +396,7 @@ function AiView() {
     setStreamText("");
     setError("");
     setPendingActions([]);
+    setActionResults([]);
     setApplyNotice(null);
     try {
       const response = await api.aiChatStream(prompt, history, (event) => {
@@ -335,9 +448,11 @@ function AiView() {
         actions,
       );
       setApplyNotice({ ok: true, text: result.message });
+      setActionResults(result.results ?? []);
       setPendingActions((prev) => prev.filter((action) => !actions.includes(action)));
     } catch (e) {
       setApplyNotice({ ok: false, text: String(e) });
+      setActionResults([]);
     } finally {
       setApplying(false);
     }
@@ -537,43 +652,68 @@ function AiView() {
                     </div>
                   </div>
                 )}
-                {pendingActions.length > 0 && (
+                {(pendingActions.length > 0 || actionResults.length > 0 || applyNotice) && (
                   <div className="ai-actions">
-                    <div className="ai-action-head">
-                      <span className="ai-action-title">
-                        <Wand2 size={14} />
-                        待执行操作
-                      </span>
-                      {pendingActions.length > 1 && (
-                        <button
-                          className="ai-action-btn primary"
-                          onClick={() => applyActions(pendingActions)}
-                          disabled={applying}
-                        >
-                          <Zap size={14} />
-                          全部执行
-                        </button>
-                      )}
-                    </div>
-                    {pendingActions.map((action, index) => (
-                      <div className="ai-action-card" key={index}>
+                    {pendingActions.length > 0 && (
+                      <>
                         <div className="ai-action-head">
                           <span className="ai-action-title">
                             <Wand2 size={14} />
-                            {actionLabel(action)}
+                            待执行操作
                           </span>
-                          <button
-                            className="ai-action-btn primary"
-                            onClick={() => applyActions([action])}
-                            disabled={applying}
-                          >
-                            <Check size={14} />
-                            执行
-                          </button>
+                          {pendingActions.length > 1 && (
+                            <button
+                              className="ai-action-btn primary"
+                              onClick={() => applyActions(pendingActions)}
+                              disabled={applying}
+                            >
+                              <Zap size={14} />
+                              全部执行
+                            </button>
+                          )}
                         </div>
-                        <div className="ai-action-detail">{actionDetail(action)}</div>
+                        {pendingActions.map((action, index) => (
+                          <div className="ai-action-card" key={index}>
+                            <div className="ai-action-head">
+                              <span className="ai-action-title">
+                                <Wand2 size={14} />
+                                {actionLabel(action)}
+                              </span>
+                              <button
+                                className="ai-action-btn primary"
+                                onClick={() => applyActions([action])}
+                                disabled={applying}
+                              >
+                                <Check size={14} />
+                                执行
+                              </button>
+                            </div>
+                            <div className="ai-action-detail">{actionDetail(action)}</div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {actionResults.length > 0 && (
+                      <div className="ai-result-list">
+                        <div className="ai-action-head">
+                          <span className="ai-action-title">
+                            <Database size={14} />
+                            操作结果
+                          </span>
+                        </div>
+                        {actionResults.map((result, index) => (
+                          <div className="ai-result-card" key={`${result.action}-${index}`}>
+                            <div className="ai-action-head">
+                              <span className="ai-action-title">
+                                <Search size={14} />
+                                {resultLabel(result.action)}
+                              </span>
+                            </div>
+                            <AiResultBody result={result} />
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
                     {applyNotice && (
                       <div className={`ai-action-note${applyNotice.ok ? "" : " error"}`}>
                         {applyNotice.text}

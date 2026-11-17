@@ -5,7 +5,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::db::{today_str, week_start_str, Database, WorkEntryInput};
+use super::db::{today_str, week_start_str, Database, WorkEntry, WorkEntryInput};
 
 const SETTING_KEY: &str = "ai_config";
 
@@ -36,6 +36,28 @@ pub enum AiAction {
         color: Option<String>,
     },
     ArchiveProject { id: i64 },
+    QueryEntries {
+        #[serde(default)]
+        keyword: Option<String>,
+        #[serde(default)]
+        project_id: Option<i64>,
+        #[serde(default)]
+        start_date: Option<String>,
+        #[serde(default)]
+        end_date: Option<String>,
+        #[serde(default)]
+        tag: Option<String>,
+        #[serde(default)]
+        limit: Option<i64>,
+    },
+    UpdateProject {
+        id: i64,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        color: Option<String>,
+    },
+    RestoreProject { id: i64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +72,14 @@ pub struct AiChatResponse {
 pub struct AiApplyResult {
     pub applied: usize,
     pub message: String,
+    pub results: Vec<AiActionResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiActionResult {
+    pub action: String,
+    pub data: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -243,13 +273,18 @@ pub fn build_context(db: &Database) -> Result<String, String> {
         Err(error) => lines.push(format!("今日概览：读取失败（{error}）。")),
     }
 
-    match db.list_projects(false) {
-        Ok(projects) if projects.is_empty() => lines.push("项目：暂无进行中的项目。".to_string()),
+    match db.list_projects(true) {
+        Ok(projects) if projects.is_empty() => lines.push("项目：暂无。".to_string()),
         Ok(projects) => {
-            lines.push("进行中的项目：".to_string());
+            lines.push("项目：".to_string());
             for project in projects {
+                let status = if project.status == "archived" {
+                    "（已归档）"
+                } else {
+                    ""
+                };
                 lines.push(format!(
-                    "- #{} {}（颜色 {}）",
+                    "- #{} {}{status}（颜色 {}）",
                     project.id,
                     project.name,
                     project.color.as_deref().unwrap_or("未设置"),
@@ -292,7 +327,15 @@ pub fn build_context(db: &Database) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-const SYSTEM_PROMPT: &str = r##"你是 Mars 个人工作记录应用的 AI 助手。你可以根据下面的系统数据分析用户的工作情况，帮助整理日报、周报，并统计项目投入。当用户明确要求操作数据时，只允许执行四种受控操作：保存工作记录（saveEntry）、删除工作记录（deleteEntry）、创建项目（createProject）、归档项目（archiveProject）。回复正文请使用 Markdown 格式排版，保持清晰易读，没有提供的数据不要编造。
+const SYSTEM_PROMPT: &str = r##"你是 Mars 个人工作记录应用的 AI 助手。你可以根据下面的系统数据分析用户的工作情况，帮助整理日报、周报，并统计项目投入。当用户明确要求操作或查询数据时，只能使用以下受控动作：
+- 查询工作记录（queryEntries）：可按关键字、项目、日期范围、标签筛选，limit 默认 20 条，执行后会返回真实查询结果；
+- 保存或更新工作记录（saveEntry）：entry 携带 id 时更新已有记录，不携带 id 时新增；
+- 删除工作记录（deleteEntry）；
+- 创建项目（createProject）；
+- 更新项目（updateProject）：可只更新名称或颜色；
+- 归档项目（archiveProject）；
+- 恢复项目（restoreProject）。
+回复正文请使用 Markdown 格式排版，保持清晰易读，没有提供的数据不要编造。
 
 系统数据：
 {context}
@@ -300,10 +343,11 @@ const SYSTEM_PROMPT: &str = r##"你是 Mars 个人工作记录应用的 AI 助�
 回复规则：
 - 先用 Markdown 输出完整的回复正文，正文中不要出现 JSON。
 - 当用户明确要求执行上述操作时，在 Markdown 正文末尾再输出一个 JSON 对象，不要用 markdown 代码块包裹，格式如下：
-{"actions":[{"type":"saveEntry","entry":{"projectId":1,"workDate":"YYYY-MM-DD","startedAt":null,"endedAt":null,"title":"标题","content":"内容","tags":"标签"}},{"type":"deleteEntry","id":3},{"type":"createProject","name":"项目名","color":"#C3451F"},{"type":"archiveProject","id":2}]}
+{"actions":[{"type":"queryEntries","keyword":"修复","projectId":1,"startDate":"YYYY-MM-DD","endDate":"YYYY-MM-DD","tag":"开发","limit":20},{"type":"saveEntry","entry":{"id":null,"projectId":1,"workDate":"YYYY-MM-DD","startedAt":null,"endedAt":null,"title":"标题","content":"内容","tags":"标签"}},{"type":"deleteEntry","id":3},{"type":"createProject","name":"项目名","color":"#C3451F"},{"type":"updateProject","id":2,"name":"新项目名","color":"#123456"},{"type":"archiveProject","id":2},{"type":"restoreProject","id":4}]}
 - 没有需要执行的操作时，不要输出 JSON。
-- 项目 id 必须从系统数据中选取，不能编造；日期使用 YYYY-MM-DD 格式，默认今天。
-- 只使用上述四种工具，不要编造工具名。
+- 查询动作不用于补充回复内容，回复正文不得预先编造查询结果；查询结果会在动作执行后展示。
+- 项目 id、记录 id 必须从系统数据或查询结果中选取，不能编造；日期使用 YYYY-MM-DD 格式，默认今天。
+- 只使用上述七种工具，不要编造工具名。
 - JSON 必须放在回复最末尾，正文与 JSON 之间可以换行，JSON 后面不要再输出任何文字。"##;
 
 fn parse_json(text: &str) -> Result<Value, String> {
@@ -418,6 +462,7 @@ pub fn apply_actions(
     actions: &[AiAction],
 ) -> Result<AiApplyResult, String> {
     let mut applied = 0usize;
+    let mut results = Vec::new();
     for action in actions {
         let (tool_name, args) = match action {
             AiAction::SaveEntry { entry } => {
@@ -437,20 +482,87 @@ pub fn apply_actions(
             AiAction::ArchiveProject { id } => {
                 ("archiveProject", serde_json::json!({"id": id}))
             }
+            AiAction::QueryEntries {
+                keyword,
+                project_id,
+                start_date,
+                end_date,
+                tag,
+                limit,
+            } => (
+                "queryEntries",
+                serde_json::json!({
+                    "keyword": keyword,
+                    "projectId": project_id,
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "tag": tag,
+                    "limit": limit,
+                }),
+            ),
+            AiAction::UpdateProject { id, name, color } => (
+                "updateProject",
+                serde_json::json!({"id": id, "name": name, "color": color}),
+            ),
+            AiAction::RestoreProject { id } => {
+                ("restoreProject", serde_json::json!({"id": id}))
+            }
         };
         let log_id = db
             .log_ai_tool(session_id, tool_name, Some(&args.to_string()), "running")
             .map_err(|error| format!("记录操作日志失败：{error}"))?;
         let result = match action {
-            AiAction::SaveEntry { entry } => db.save_entry(entry).map(|_| ()),
-            AiAction::DeleteEntry { id } => db.delete_entry(*id),
-            AiAction::CreateProject { name, color } => {
-                db.create_project(name, color.as_deref()).map(|_| ())
+            AiAction::SaveEntry { entry } => db
+                .save_entry(entry)
+                .map(|saved| serde_json::to_value(saved).unwrap_or_default())
+                .map_err(|error| error.to_string()),
+            AiAction::DeleteEntry { id } => db
+                .delete_entry(*id)
+                .map(|_| Value::Null)
+                .map_err(|error| error.to_string()),
+            AiAction::CreateProject { name, color } => db
+                .create_project(name, color.as_deref())
+                .map(|project| serde_json::to_value(project).unwrap_or_default())
+                .map_err(|error| error.to_string()),
+            AiAction::ArchiveProject { id } => db
+                .archive_project(*id)
+                .map(|_| Value::Null)
+                .map_err(|error| error.to_string()),
+            AiAction::QueryEntries {
+                keyword,
+                project_id,
+                start_date,
+                end_date,
+                tag,
+                limit,
+            } => query_entries(
+                db,
+                keyword,
+                *project_id,
+                start_date,
+                end_date,
+                tag,
+                *limit,
+            ),
+            AiAction::UpdateProject { id, name, color } => {
+                update_project_action(db, *id, name, color)
             }
-            AiAction::ArchiveProject { id } => db.archive_project(*id),
+            AiAction::RestoreProject { id } => db
+                .restore_project(*id)
+                .map(|_| serde_json::json!({"id": id, "status": "active"}))
+                .map_err(|error| error.to_string()),
         };
         match result {
-            Ok(()) => {
+            Ok(data) if !data.is_null() => {
+                db.update_ai_tool_status(log_id, "done")
+                    .map_err(|error| format!("更新操作日志失败：{error}"))?;
+                applied += 1;
+                results.push(AiActionResult {
+                    action: tool_name.to_string(),
+                    data,
+                });
+            }
+            Ok(_) => {
                 db.update_ai_tool_status(log_id, "done")
                     .map_err(|error| format!("更新操作日志失败：{error}"))?;
                 applied += 1;
@@ -462,5 +574,149 @@ pub fn apply_actions(
         }
     }
     let message = format!("已完成 {applied} 项操作");
-    Ok(AiApplyResult { applied, message })
+    Ok(AiApplyResult {
+        applied,
+        message,
+        results,
+    })
+}
+
+fn query_entries(
+    db: &Database,
+    keyword: &Option<String>,
+    project_id: Option<i64>,
+    start_date: &Option<String>,
+    end_date: &Option<String>,
+    tag: &Option<String>,
+    limit: Option<i64>,
+) -> Result<Value, String> {
+    let entries = db
+        .list_entries(start_date.as_deref(), end_date.as_deref(), project_id, tag.as_deref())
+        .map_err(|error| error.to_string())?;
+    let keyword = keyword
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_lowercase);
+    let matched: Vec<WorkEntry> = entries
+        .into_iter()
+        .filter(|entry| {
+            keyword.as_ref().map_or(true, |needle| {
+                entry.title.to_lowercase().contains(needle)
+                    || entry
+                        .content
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(needle)
+                    || entry
+                        .tags
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(needle)
+            })
+        })
+        .take(limit.unwrap_or(20).max(0) as usize)
+        .collect();
+    Ok(serde_json::to_value(&matched).unwrap_or_default())
+}
+
+fn update_project_action(
+    db: &Database,
+    id: i64,
+    name: &Option<String>,
+    color: &Option<String>,
+) -> Result<Value, String> {
+    let current = db
+        .get_project(id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "项目不存在".to_string())?;
+    let next_name = match name.as_deref() {
+        Some(value) if value.trim().is_empty() => {
+            return Err("项目名称不能为空".to_string());
+        }
+        Some(value) => value.trim().to_string(),
+        None => current.name,
+    };
+    let next_color = match color.as_deref() {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => Some(value.trim().to_string()),
+        None => current.color,
+    };
+    db.update_project(id, &next_name, next_color.as_deref())
+        .map(|updated| serde_json::to_value(updated).unwrap_or_default())
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> Database {
+        Database::open_in_memory().expect("memory db")
+    }
+
+    #[test]
+    fn apply_actions_query_edit_and_restore() {
+        let db = db();
+        let project = db.create_project("Mars", Some("#C3451F")).unwrap();
+        let entry = db
+            .save_entry(&WorkEntryInput {
+                id: None,
+                project_id: Some(project.id),
+                work_date: "2026-11-17".into(),
+                started_at: None,
+                ended_at: None,
+                title: "修复统计问题".into(),
+                content: Some("调整重复时段统计".into()),
+                tags: Some("开发".into()),
+            })
+            .unwrap();
+        let actions = vec![
+            AiAction::SaveEntry {
+                entry: WorkEntryInput {
+                    id: Some(entry.id),
+                    project_id: Some(project.id),
+                    work_date: "2026-11-17".into(),
+                    started_at: None,
+                    ended_at: None,
+                    title: "修复统计问题（已更新）".into(),
+                    content: Some("调整重复时段统计".into()),
+                    tags: Some("开发".into()),
+                },
+            },
+            AiAction::QueryEntries {
+                keyword: Some("已更新".into()),
+                project_id: Some(project.id),
+                start_date: None,
+                end_date: None,
+                tag: None,
+                limit: Some(20),
+            },
+            AiAction::UpdateProject {
+                id: project.id,
+                name: Some("Mars 客户端".into()),
+                color: None,
+            },
+            AiAction::ArchiveProject { id: project.id },
+            AiAction::RestoreProject { id: project.id },
+        ];
+        let result = apply_actions(&db, None, &actions).unwrap();
+        assert_eq!(result.applied, 5);
+        assert_eq!(result.results.len(), 4);
+
+        let query = result
+            .results
+            .iter()
+            .find(|item| item.action == "queryEntries")
+            .expect("query result");
+        let entries: Vec<WorkEntry> = serde_json::from_value(query.data.clone()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "修复统计问题（已更新）");
+
+        let updated = db.get_project(project.id).unwrap().unwrap();
+        assert_eq!(updated.name, "Mars 客户端");
+        assert_eq!(updated.status, "active");
+    }
 }
